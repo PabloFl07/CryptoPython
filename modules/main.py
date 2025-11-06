@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from modules import gen_key, encrypt
 
 
 def main():
