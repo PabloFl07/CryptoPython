@@ -1,4 +1,5 @@
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+#from cryptography.hazmat.primitives.kdf.hkdf import HKDF      # TODO: considerar HKDF para derivar claves
 from cryptography.exceptions import InvalidTag
 import secrets
 from pathlib import Path
@@ -7,10 +8,11 @@ import time
 import hashlib
 import logging
 
+import argparse
 
 # Configuración de rutas
-test_path = Path.home() / "Dev" / "CryptoPython" / "Sandbox"/ ".secret" / "secret.key"
-file_path = "/home/pablo/Dev/CryptoPython/Sandbox/hola.txt"
+test_path = Path.home() / "Dev" / "CryptoPython" / "Sandbox" / ".secret" / "secret.key"     # TODO: obtener la ruta actual del usuario 
+file_path = "/home/pablo/Dev/CryptoPython/Sandbox/hola.txt"                                 # TODO: Esto debe ser un input
 
 # Tamaños de chunk
 DEFAULT_CHUNK_SIZE = 2 * 1024 * 1024  # 2 MB
@@ -18,132 +20,150 @@ CHUNK_SIZE = DEFAULT_CHUNK_SIZE
 TAG_SIZE = 16  # Tamaño del tag de autenticación de AES-GCM
 
 
-log_path = Path.home() / "Dev" / "CryptoPython" / "Sandbox" / "crypto.log"
+log_path = Path.home() / "Dev" / "CryptoPython" / "Sandbox" / "crypto.log"                  # TODO: Esto se le debe decir al usario
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(log_path, encoding='utf-8'),
-        logging.StreamHandler()  # También a consola
-    ]
+        logging.FileHandler(log_path, encoding="utf-8"),
+        logging.StreamHandler(),  # También a consola
+    ],
 )
 
 logger = logging.getLogger(__name__)
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Chunk-based AES-GCM File Encryptor/Decryptor",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    key_parser = subparsers.add_parser("genkey", help="Load or generate encryption key")
+    key_parser.add_argument("--keyfile", help="Path to the key file", default=str(test_path), required=False)
+    key_parser.add_argument("--genkey", help="Generate a new encryption key", action="store_true")
+
+    encryption_parser = subparsers.add_parser("encrypt", help="To encrypt a file")
+    encryption_parser.add_argument("file", help="Path to the file to encrypt")
+
+    decryption_parser = subparsers.add_parser("decrypt", help="To decrypt a file")
+    decryption_parser.add_argument("file", help="Path to the file to decrypt")
 
 
-def gen_key() -> bytes:
+    cheksum_parser = subparsers.add_parser("verify", help="To verify integrity of decrypted file")
+    cheksum_parser.add_argument("original", help="Path to the original file")
+    cheksum_parser.add_argument("decrypted", help="Path to decrypted file")
+
+    return parser.parse_args()
+
+def gen_key(path=False) -> bytes:
     """
     Genera una llave de 256 bits para AES256 y la guarda en un archivo
     con permisos seguros
-    
+
     Returns:
         key (bytes): La clave generada
     """
+    if not path:
+        key_path = test_path
+    else:
+        key_path = Path(path)
+
     key = secrets.token_bytes(32)
-    key_path = test_path
     key_path.parent.mkdir(exist_ok=True, mode=0o700)
-    
-    with open(key_path, 'wb') as keyf:
+
+    with open(key_path, "wb") as keyf:
         keyf.write(key)
     os.chmod(key_path, 0o600)
-    
+
     return key
 
-
-def load_key() -> bytes:
+def load_key(path=False) -> bytes:
     """
     Carga una clave del archivo, si no existe, crea una clave nueva
-    
+
     Returns:
         key (bytes): La clave cargada o generada
     """
-    key_path = test_path
-    if not key_path.exists():
-        print("No se ha encontrado la clave, generando una nueva...")
+    key_path = test_path            # Ruta actual del usuario 
+    if not key_path.exists():       # Si no existe, la generamos
+        logger.warning("No se ha encontrado la clave, generando una nueva...")
         return gen_key()
-    
-    with open(key_path, 'rb') as keyf:
-        return keyf.read()
 
+    with open(key_path, "rb") as key_file:
+        return key_file.read()
 
-def calculate_hash(file_name, chunk_size=1*1024*1024):
+def calculate_hash(file_name, chunk_size=1 * 1024 * 1024):
     """Calcula el hash SHA-256 de un archivo"""
     hash_obj = hashlib.sha256()
     with open(file_name, "rb") as f:
-        while chunk := f.read(chunk_size):
+        while chunk := f.read(chunk_size): 
             hash_obj.update(chunk)
     return hash_obj.hexdigest()
-
-
-def encrypt(key, nonce, data, aad):
-    nonce = secrets.token_bytes(12)
-    aesgcm = AESGCM(key)
-    return aesgcm.encrypt(nonce, data, aad)
-
-def decrypt(key,nonce, data, aad):
-    aesgcm = AESGCM(key)
-    return aesgcm.decrypt(nonce, data, aad)
 
 
 def encrypt_file(key, file_path):
     """
     Cifra un archivo usando AES-GCM con chunks
-    
+
     Args:
         key: Clave de cifrado de 32 bytes
         file_path: Ruta al archivo a cifrar
-        
+
     Returns:
         str: Ruta al archivo cifrado
     """
     encrypted_file_path = file_path + ".enc"
     start_time = time.time()
-    
+
     try:
         # Generar UN nonce único para todo el archivo
-        nonce = secrets.token_bytes(12)
+        base_nonce = secrets.token_bytes(12)
+        aesgcm = AESGCM(key)
         file_name = os.path.basename(file_path)
-        
+
         with open(file_path, "rb") as f_in, open(encrypted_file_path, "wb") as f_out:
             # Escribir el nonce UNA SOLA VEZ al inicio del archivo
-            f_out.write(nonce)
+            f_out.write(base_nonce)
             logger.info("Cifrando %s...", file_name)
-            
+
             # Cifrar el archivo por chunks
             chunk_number = 0
             while chunk := f_in.read(CHUNK_SIZE):
+                counter_bytes = chunk_number.to_bytes(12, "big")
+                nonce = bytes(a ^ b for a, b in zip(base_nonce, counter_bytes))        # Derivamos el nonce base para cada chunk
                 # Usar el número de chunk como parte de los datos asociados
                 # para vincular cada chunk a su posición
                 associated_data = f"{file_name}:{chunk_number}".encode()
-                
+
                 # Cifrar el chunk (incluye el tag de autenticación de 16 bytes)
-                encrypted_chunk = encrypt(key, nonce, chunk, associated_data)
+                encrypted_chunk = aesgcm.encrypt(nonce, chunk, associated_data)
                 f_out.write(encrypted_chunk)
                 logger.debug("Chunk %d cifrado (%d bytes)", chunk_number, len(chunk))
                 chunk_number += 1
-        
+
         # Estadísticas
 
         elapsed = time.time() - start_time
-        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-        encryption_speed = file_size_mb / elapsed_time if elapsed_time > 0 else 0
+        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        logger.info(
+            "✓ Archivo cifrado en %.2fs (%.1f MB, %.1f MB/s)",
+            elapsed,
+            size_mb,
+            size_mb / elapsed,
+        )
 
-        logger.info("✓ Archivo cifrado en %.2fs (%.1f MB, %.1f MB/s)",
-                    elapsed, size_mb, size_mb / elapsed)
-        
-
-        
         return encrypted_file_path
-        
+
     except KeyboardInterrupt:
-        print("\n[!] Cifrado interrumpido")
+        logger.exception("\n[!] Cifrado interrumpido")
         if os.path.exists(encrypted_file_path):
             os.remove(encrypted_file_path)
         raise
     except Exception as e:
-        print(f"[!] Error durante el cifrado: {e}")
+        logger.error(f"[!] Error durante el cifrado: {e}")
         if os.path.exists(encrypted_file_path):
             os.remove(encrypted_file_path)
         raise
@@ -152,52 +172,58 @@ def encrypt_file(key, file_path):
 def decrypt_file(key, encrypted_file_path):
     """
     Descifra un archivo cifrado con AES-GCM
-    
+
     Args:
         key: Clave de descifrado de 32 bytes
         encrypted_file_path: Ruta al archivo cifrado
-        
+
     Returns:
         str: Ruta al archivo descifrado o None si falla
     """
     decrypted_file_path = encrypted_file_path.replace(".enc", ".dec")
-    
+
     try:
         # Extraer el nombre del archivo original desde el path cifrado
         file_name = os.path.basename(encrypted_file_path.replace(".enc", ""))
-        
-        with open(encrypted_file_path, "rb") as f_in, open(decrypted_file_path, "wb") as f_out:
+        aesgcm = AESGCM(key)
+
+        with (
+            open(encrypted_file_path, "rb") as f_in,
+            open(decrypted_file_path, "wb") as f_out,
+        ):
             # Leer el nonce UNA SOLA VEZ del inicio del archivo
-            nonce = f_in.read(12)
-            if len(nonce) != 12:
+            base_nonce = f_in.read(12)
+            if len(base_nonce) != 12:
                 raise ValueError("Archivo cifrado corrupto: nonce inválido")
-            
+
             # Descifrar el archivo por chunks
             chunk_number = 0
             while True:
+                counter_bytes = chunk_number.to_bytes(12, "big")
+                nonce = bytes(a ^ b for a, b in zip(base_nonce, counter_bytes))
                 # Leer chunk cifrado (datos + tag de 16 bytes)
                 encrypted_chunk = f_in.read(CHUNK_SIZE + TAG_SIZE)
                 if not encrypted_chunk:
                     break
-                
+
                 # Usar los mismos datos asociados que en el cifrado
                 associated_data = f"{file_name}:{chunk_number}".encode()
-                
+
                 # Descifrar el chunk
-                decrypted_chunk = decrypt(key,nonce, encrypted_chunk, associated_data)
+                decrypted_chunk = aesgcm.decrypt(nonce, encrypted_chunk, associated_data)
                 f_out.write(decrypted_chunk)
                 chunk_number += 1
-        
-        print(f"✓ Archivo descifrado: {decrypted_file_path}")
+
+        logger.info(f"✓ Archivo descifrado: {decrypted_file_path}")
         return decrypted_file_path
-        
+
     except InvalidTag:
-        print("[!] Error: Clave incorrecta o archivo manipulado")
+        logger.error("[!] Error: Clave incorrecta o archivo manipulado")
         if os.path.exists(decrypted_file_path):
             os.remove(decrypted_file_path)
         return None
     except Exception as e:
-        print(f"[!] Error durante el descifrado: {e}")
+        logger.error(f"[!] Error durante el descifrado: {e}")
         if os.path.exists(decrypted_file_path):
             os.remove(decrypted_file_path)
         return None
@@ -206,42 +232,52 @@ def decrypt_file(key, encrypted_file_path):
 def verify_integrity(original_path, decrypted_path):
     """
     Verifica la integridad comparando hashes y renombra el archivo descifrado
-    
+
     Args:
         original_path: Ruta al archivo original
         decrypted_path: Ruta al archivo descifrado
     """
-    print("\nVerificando integridad...")
+    logger.info("Verificando integridad...")
     original_hash = calculate_hash(original_path)
     decrypted_hash = calculate_hash(decrypted_path)
-    
-    print(f"  Hash original:   {original_hash}")
-    print(f"  Hash descifrado: {decrypted_hash}")
-    
+
     if original_hash == decrypted_hash:
-        print("✓ Integridad verificada: Los archivos son idénticos")
-        
+        logger.info("✓ Integridad verificada: Los archivos son idénticos")
+
         # Renombrar el archivo descifrado (quitar extensión .dec)
         final_path = decrypted_path.replace(".dec", "")
         os.rename(decrypted_path, final_path)
-        print(f"✓ Archivo renombrado a: {final_path}")
+        logger.info(f"✓ Archivo renombrado a: {final_path}")
     else:
-        print("✗ FALLO DE INTEGRIDAD: Los archivos difieren")
+        logger.error("✗ FALLO DE INTEGRIDAD: Los archivos difieren")
 
 
 # Ejemplo de uso
 if __name__ == "__main__":
-    # Cargar o generar clave
-    key = load_key()
-    
+    args = parse_args()
+
+
+    if args.genkey:
+        key = gen_key()
+    else:
+        key = load_key()
+
+    match args.command:
+        case "encrypt":
+            encrypt_file()
+        case "decrypt":
+            decrypt_file()
+
+
+
     # Ejemplo 1: Cifrar archivo
-    print("=== CIFRADO ===")
+    logger.info("=== CIFRADO ===")
     encrypted_path = encrypt_file(key, file_path)
-    
+
     # Ejemplo 2: Descifrar archivo
-    print("\n=== DESCIFRADO ===")
+    logger.info("=== DESCIFRADO ===")
     decrypted_path = decrypt_file(key, encrypted_path)
-    
+
     # Ejemplo 3: Verificar integridad
     if decrypted_path:
         verify_integrity(file_path, decrypted_path)
