@@ -12,9 +12,15 @@ Características de seguridad:
 - Nonces únicos derivados para cada chunk
 - Datos asociados (AAD) para vincular chunks con su posición
 - Protección contra manipulación mediante tags de autenticación
+
+!! ATENCION !! Este programa no implementa protocolos estándar de criptografía y no ha sido evaluado como tal.
 """
-# TODO Derivación de llaves KDF
-# TODO Encriptar carpetas: encriptar archivos, comprimir carpeta , encriptar comprimido.
+# TODO Encriptar carpetas: comprimir carpeta , encriptar comprimido.
+# TODO Funcion "log" para loggear con un formato a archivo y con otro a consola ( formatos listos , solo integrar )
+
+# ChangeLog
+# * Derivación de nonces por BLAKE2s PRF
+# * Escribir y leer metadatos en los archivos encriptados para evitar conflictos con los parámetros.
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag
@@ -41,9 +47,14 @@ DEFAULT_KEY_FILE = DEFAULT_KEY_DIR / "secret.key"
 # Los archivos se dividen en chunks para evitar cargar todo en memoria
 DEFAULT_CHUNK_SIZE = 2 * 1024 * 1024  # 2 MB
 
-# Tamaño del tag de autenticación de AES-GCM (16 bytes)
-# Este tag se añade automáticamente al cifrar y se usa para verificar integridad
-TAG_SIZE = 16
+
+# Encabezado del archivo encriptado
+MAGIC = b"ACG1"  # 4 bytes
+FLAGS = 0x00
+CHUNK_SIZE_LEN = 4
+
+SALT_LEN = 32
+TAG_SIZE = 16  # Tamaño del tag de autenticación de AES-GCM (16 bytes)
 
 # Cantidad de segundos de diferencia entre la fecha actual y la última fecha de modificación de la llave que toleramos para considerarla "segura"
 # Se le suma a la última fecha de modificación para comprobarla con la fecha actual
@@ -153,7 +164,7 @@ Examples:
     )
     list_parser.add_argument(
         "path",
-        nargs="?" ,
+        nargs="?",
         default=DEFAULT_KEY_DIR,
         help="Ruta al directorio que contiene las llaves",
     )
@@ -181,7 +192,8 @@ def setup_logging(log_file=None):
     file_logger.handlers.clear()
 
     # Formato común
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    formatter = logging.Formatter("[%(levelname)s] %(message)s")
 
     # Handler de consola
     console = logging.StreamHandler()
@@ -192,9 +204,38 @@ def setup_logging(log_file=None):
     if log_file:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
         file = logging.FileHandler(log_file, encoding="utf-8")
-        file.setFormatter(formatter)
+        file.setFormatter(file_formatter)
         logger.addHandler(file)
         file_logger.addHandler(file)
+
+
+def log(level : str,  message: str, file=False):
+    """
+    Permite loggear un mensaje en consola y archivo con dos formatos distintos simultáneamente.
+
+    Args:
+        level (str): Soportados info , warning , error
+
+    """
+    match level:
+        case "info":
+            if file:
+                file_logger.info(message)
+            else:
+                file_logger.info(message)
+                logger.info(message)
+        case "warning":
+            if file:
+                file_logger.warning(message)
+            else:
+                file_logger.warning(message)
+                logger.warning(message)
+        case "error":
+            if file:
+                file_logger.error(message)
+            else:
+                file_logger.error(message)
+                logger.error(message)
 
 
 def return_status(start, file_path):
@@ -223,8 +264,8 @@ def gen_key(key_path: Path, force: bool = False) -> bytes:
     """
     # Verificar si la clave ya existe
     if key_path.exists() and not force:
-        logger.error(f"La clave ya existe en {key_path}")
-        logger.error("Use --force para sobrescribir")
+        log("error", f"La clave ya existe en {key_path}")
+        log("error", "Use --force para sobrescribir")
         sys.exit(1)
 
     # Generar 32 bytes aleatorios criptográficamente seguros
@@ -240,7 +281,7 @@ def gen_key(key_path: Path, force: bool = False) -> bytes:
     # Establecer permisos del archivo (solo usuario: rw-------)
     os.chmod(key_path, 0o600)
 
-    logger.info(f"✓ Clave generada y guardada en: {key_path}")
+    log("info", f"✓ Clave generada y guardada en: {key_path}")
 
     return key
 
@@ -260,14 +301,15 @@ def load_key(key_path: Path) -> bytes:
     """
     # Verificar que el archivo existe
     if not key_path.exists():
-        logger.error(f"No se encontró la clave en: {key_path}")
+        log("error", f"No se encontró la clave en: {key_path}")
         sys.exit(1)
 
     if (
         os.path.getmtime(key_path) + KEY_MTIME_TOL
         <= datetime.datetime.now().timestamp()
     ):
-        logger.warning(
+        log(
+            "warning"
             "! La clave que se va a utilizar es antigua ! Considera usar una nueva"
         )
 
@@ -278,18 +320,61 @@ def load_key(key_path: Path) -> bytes:
 
     # Validar que la clave tiene el tamaño correcto (32 bytes para AES-256)
     if len(key) != 32:
-        logger.error("Clave inválida: debe tener 32 bytes")
+        log("error" , "Clave inválida: debe tener 32 bytes")
         sys.exit(1)
 
     return key
 
 
-def list_keys(path: Path = DEFAULT_KEY_DIR) -> list:
+def list_keys(path: Path) -> list:
     if not path.exists():
-        logger.error(f"No se encontró la ruta {path}")
+        log("error" , f"No se encontró la ruta {path}")
         sys.exit(1)
 
     return list(f for f in os.listdir(str(path)) if f.endswith(".key"))
+
+
+# ============================================================================
+# METADATOS DEL ENCRIPTADO
+# ============================================================================
+
+
+def derive_nonce(salt: bytes, chunk_number: int):
+    return hashlib.blake2s(
+        chunk_number.to_bytes(8, "big"), key=salt, digest_size=12
+    ).digest()
+
+
+def write_metadata(file, *metadata):
+    for d in metadata:
+        file.write(d)
+
+
+def read_metadata(file):
+    magic = file.read(4)  # Hardcoded LEN
+    if magic != MAGIC:
+        log("warning", "Formato de archivo desconocido o corrupto")
+
+    flags_byte = file.read(1)  # Harcoded LEN
+    flags = flags_byte[0]
+
+    if flags != FLAGS:
+        log("warning", "Espacio reservado a flags ha sido corrompido")
+
+    chunk_size = int.from_bytes(file.read(4), "big")  # Harcoded LEN
+
+    salt = file.read(SALT_LEN)  # Configurable LEN
+    if len(salt) != SALT_LEN:
+        logger.warning("Archivo cifrado corrupto: salt inválido")
+
+    name_len = int.from_bytes(file.read(2), "big")
+
+    original_name = file.read(name_len).decode("utf-8")
+    logger.info(original_name)
+
+    return chunk_size, salt, original_name
+    ...
+
 
 # ============================================================================
 # ENCRIPTADO / DESENCRIPTADO
@@ -328,7 +413,7 @@ def encrypt_file(
     """
     # Validar que el archivo existe
     if not file_path.exists():
-        logger.error(f"Archivo no encontrado: {file_path}")
+        log("error" , f"Archivo no encontrado: {file_path}")
         sys.exit(1)
 
     # Definir ruta de salida si no se especificó
@@ -339,7 +424,9 @@ def encrypt_file(
 
     try:
         # Generar nonce base único para todo el archivo (12 bytes)
-        base_nonce = secrets.token_bytes(12)
+        salt = secrets.token_bytes(SALT_LEN)
+
+        original_file_name = file_path.name.encode("utf-8")
 
         # Crear instancia de AES-GCM con la clave
         aesgcm = AESGCM(key)
@@ -348,7 +435,15 @@ def encrypt_file(
         with open(file_path, "rb") as f_in, open(output_path, "wb") as f_out:
             # Escribir nonce base al inicio del archivo cifrado
             # Este nonce se necesitará para descifrar
-            f_out.write(base_nonce)
+            write_metadata(
+                f_out,
+                MAGIC,
+                bytes([FLAGS]),
+                (chunk_size).to_bytes(4, "big"),
+                salt,
+                len(original_file_name).to_bytes(2, "big"),
+                original_file_name,
+            )
 
             # Barra de progreso
             pbar = tqdm(
@@ -363,17 +458,15 @@ def encrypt_file(
             # Procesar archivo por chunks
             while chunk := f_in.read(chunk_size):
                 # Derivar nonce único para este chunk
-                # Usamos XOR entre el nonce base y un contador
-                counter_bytes = chunk_number.to_bytes(12, "big")
-                nonce = bytes(
-                    a ^ b for a, b in zip(base_nonce, counter_bytes)
-                )  # ! TODO: Derivación por HKDF
+                nonce = derive_nonce(salt, chunk_number)  # ! TODO: Derivación por HKDF
 
                 # Crear datos asociados (AAD) para vincular chunk con su posición
                 # Esto previene reordenamiento o sustitución de chunks
-                associated_data = f"{file_path.name}:{chunk_number}".encode()
+                associated_data = original_file_name + f":{chunk_number}".encode(
+                    "utf-8"
+                )
 
-                # Cifrar el chunk con AES-GCM
+                # Cifrar el chunk con AES-GCM}:{chunk_numbe
                 # El resultado incluye el chunk cifrado + tag de autenticación (16 bytes)
                 encrypted_chunk = aesgcm.encrypt(nonce, chunk, associated_data)
 
@@ -386,7 +479,7 @@ def encrypt_file(
 
         # Calcular estadísticas de rendimiento | # * Sustituído por la barra de progreso , queda reservado para debug o abierto a futuras implementaciones
         elapsed, size = return_status(start_time, file_path)
-        file_logger.info(
+        log( "info", 
             f"✓ Archivo cifrado en {elapsed:.2f}s ({size:.1f} MB, {size / elapsed:.1f} MB/s) guardado en: {output_path}"
         )
 
@@ -394,13 +487,13 @@ def encrypt_file(
 
     except KeyboardInterrupt:
         # Manejo de interrupción por usuario (Ctrl+C)
-        logger.error("\n[!] Cifrado interrumpido")
+        log("error" , "\n[!] Cifrado interrumpido")
         if output_path.exists():
             output_path.unlink()  # Eliminar archivo parcial
         sys.exit(1)
     except Exception as e:
         # Manejo de otros errores
-        file_logger.error(f"[!] Error durante el cifrado: {e}")
+        log("error" , f"[!] Error durante el cifrado: {e}")
         if output_path.exists():
             output_path.unlink()  # Eliminar archivo corrupto
         raise
@@ -410,7 +503,6 @@ def decrypt_file(
     key: bytes,
     encrypted_file_path: Path,
     output_path: Path = None,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> Path:
     """
     Descifra un archivo cifrado con AES-GCM.
@@ -439,7 +531,7 @@ def decrypt_file(
     """
     # Validar que el archivo existe
     if not encrypted_file_path.exists():
-        logger.error(f"Archivo no encontrado: {encrypted_file_path}")
+        log("error" , f"Archivo no encontrado: {encrypted_file_path}")
         sys.exit(1)
 
     # Definir ruta de salida si no se especificó
@@ -451,33 +543,28 @@ def decrypt_file(
     start_time = time.time()
 
     try:
-        # Extraer nombre del archivo original (sin .enc)
-        file_name = encrypted_file_path.name.replace(".enc", "")
-
         # Crear instancia de AES-GCM con la clave
         aesgcm = AESGCM(key)
 
         # Abrir archivo cifrado y archivo de salida ( Descifrado )
         with open(encrypted_file_path, "rb") as f_in, open(output_path, "wb") as f_out:
             # Leer nonce base del inicio del archivo
-            base_nonce = f_in.read(12)
-            if len(base_nonce) != 12:
-                logger.error("Archivo cifrado corrupto: nonce inválido")
+            chunk_size, salt, original_file_name = read_metadata(f_in)
+            logger.info(original_file_name)
 
             pbar = tqdm(
                 total=encrypted_file_path.stat().st_size,
                 unit="B",
                 unit_scale=True,
-                desc=f"Encriptando {encrypted_file_path.name}",
+                desc=f"Desencriptando {encrypted_file_path.name}",
                 ncols=110,
             )
 
             chunk_number = 0
             # Procesar archivo por chunks
             while True:
-                # Derivar nonce para este chunk (mismo método que en cifrado)
-                counter_bytes = chunk_number.to_bytes(12, "big")
-                nonce = bytes(a ^ b for a, b in zip(base_nonce, counter_bytes))
+                # Derivar con el mismo salt ( leído del archivo ) y el mismo nº de chunk
+                nonce = derive_nonce(salt, chunk_number)
 
                 # Leer chunk cifrado (datos + tag de autenticación de 16 bytes)
                 encrypted_chunk = f_in.read(chunk_size + TAG_SIZE)
@@ -485,7 +572,7 @@ def decrypt_file(
                     break  # Fin del archivo
 
                 # Recrear datos asociados (deben ser idénticos a los del cifrado)
-                associated_data = f"{file_name}:{chunk_number}".encode()
+                associated_data = f"{original_file_name}:{chunk_number}".encode("utf-8")
 
                 # Descifrar chunk y verificar tag de autenticación
                 # Si el tag no coincide, lanza InvalidTag exception
@@ -501,21 +588,21 @@ def decrypt_file(
         pbar.close()
 
         elapsed, size = return_status(start_time, output_path)
-        file_logger.info(
-            f"✓ Archivo {output_path} descifrado en {elapsed:.2f}s ({size:.1f} MB, {size / elapsed:.1f} MB/s)"
+        log("info",
+            f"✓ Archivo {output_path} descifrado en {elapsed:.2f}s ({size:.1f} MB, {size / elapsed:.1f} MB/s)", True
         )
 
         return output_path
 
     except InvalidTag:
         # El tag de autenticación no coincide: clave incorrecta o archivo manipulado
-        logger.error("[!] Error: Clave incorrecta o archivo manipulado")
+        log("error", "[!] Error: Clave incorrecta o archivo manipulado")
         if output_path.exists():
             output_path.unlink()  # Eliminar archivo corrupto
         sys.exit(1)
     except Exception as e:
         # Otros errores (archivo corrupto, etc.)
-        file_logger.error(f"[!] Error durante el descifrado: {e}")
+        log("error" , f"[!] Error durante el descifrado: {e}")
         if output_path.exists():
             output_path.unlink()
         sys.exit(1)
@@ -547,6 +634,7 @@ def calculate_hash(file_path: Path, chunk_size: int = 1 * 1024 * 1024) -> str:
     return hash_obj.hexdigest()
 
 
+# ? No me gusta esta función
 def rename_dec_file(decrypted_path: Path, keep_copy: bool = True) -> Path:
     """
     Renombra un archivo .dec eliminando la extensión y opcionalmente
@@ -571,18 +659,18 @@ def rename_dec_file(decrypted_path: Path, keep_copy: bool = True) -> Path:
         import shutil
 
         shutil.copy2(decrypted_path, final_path)
-        logger.info(f"✓ Archivo copiado a: {final_path}")
-        logger.info(f"✓ Copia de respaldo mantenida en: {decrypted_path}")
+        log("error", f"✓ Archivo copiado a: {final_path}")
+        log("error", f"✓ Copia de respaldo mantenida en: {decrypted_path}")
     else:
         # Solo renombrar (mueve el archivo, no mantiene copia)
         decrypted_path.rename(final_path)
-        logger.info(f"✓ Archivo renombrado a: {final_path}")
+        log("ingo", f"✓ Archivo renombrado a: {final_path}")
 
     return final_path
 
 
 def verify_integrity(
-    original_path: Path, decrypted_path: Path, delete_dec: bool = False
+    original_path: Path, decrypted_path: Path, delete: bool = False
 ) -> bool:
     """
     Verifica la integridad de un archivo descifrado comparando hashes SHA-256.
@@ -599,11 +687,11 @@ def verify_integrity(
 
     # Validar que ambos archivos existen
     if not original_path.exists():
-        logger.error(f"Archivo original no encontrado: {original_path}")
+        log("error", f"Archivo original no encontrado: {original_path}")
         return False
 
     if not decrypted_path.exists():
-        logger.error(f"Archivo descifrado no encontrado: {decrypted_path}")
+        log("error", f"Archivo descifrado no encontrado: {decrypted_path}")
         return False
 
     # Calcular hashes SHA-256 de ambos archivos
@@ -612,28 +700,30 @@ def verify_integrity(
 
     # Comparar hashes
     if original_hash == decrypted_hash:
-        logger.info("✓ Integridad verificada: Los archivos son idénticos")
-        logger.info(f"  Hash SHA-256: {original_hash}")
+        log("info", "✓ Integridad verificada: Los archivos son idénticos")
+        log("info", f"  Hash SHA-256: {original_hash}")
 
         # Eliminar archivo .dec si se solicitó y la verificación fue exitosa
-        if delete_dec and str(decrypted_path).endswith(".dec"):
+        if delete and str(decrypted_path).endswith(".dec"):
             try:
                 decrypted_path.unlink()
-                logger.info(f"✓ Archivo temporal .dec eliminado: {decrypted_path}")
+                log("info" , f"✓ Archivo temporal .dec eliminado: {decrypted_path}")
             except Exception as e:
-                logger.warning(f"No se pudo eliminar el archivo .dec: {e}")
+                logger("warning", f"No se pudo eliminar el archivo .dec: {e}")
 
         return True
     else:
         # Los hashes no coinciden: los archivos difieren
-        logger.error("[!] FALLO DE INTEGRIDAD: Los archivos difieren")
-        logger.error(
+        log("error", "[!] FALLO DE INTEGRIDAD: Los archivos difieren")
+        log("error",
             f"  Hash original:   {original_hash}\n  Hash descifrado: {decrypted_hash}"
         )
         return False
 
+
 # ============================================================================
 # ============================================================================
+
 
 def main():
     """
@@ -664,15 +754,15 @@ def main():
             path = Path(args.path)
             keys = list_keys(path)
             if keys:
-                logger.info(f"Llaves encontradas en {path}: {keys}")
+                log("info", f"Llaves encontradas en {path}: {keys}")
             else:
-                logger.info(f"No se encontraron llaves en {path}")
+                log("info" , f"No se encontraron llaves en {path}")
 
         # ---- Comando: encrypt ----
         elif args.command == "encrypt":
             # Si no existe la clave, generarla automáticamente
             if not key_path.exists():
-                logger.warning(
+                log("warning", 
                     f"Clave no encontrada, generando una nueva en {key_path}..."
                 )
                 gen_key(key_path)
@@ -681,7 +771,7 @@ def main():
             key = load_key(key_path)
             file_path = Path(args.file)
             output_path = Path(args.output) if args.output else None
-            logger.info(f"Cifrando archivo {file_path} con llave {key_path}")
+            log("info", f"Cifrando archivo {file_path} con llave {key_path}")
             encrypt_file(key, file_path, output_path, args.chunk_size)
 
         # ---- Comando: decrypt ----
@@ -690,9 +780,7 @@ def main():
             key = load_key(key_path)
             encrypted_path = Path(args.file)
             output_path = Path(args.output) if args.output else None
-            decrypted_path = decrypt_file(
-                key, encrypted_path, output_path, args.chunk_size
-            )
+            decrypted_path = decrypt_file(key, encrypted_path, output_path)
 
             # Renombrar archivo descifrado (mantener copia .dec como respaldo)
             final_path = rename_dec_file(decrypted_path, keep_copy=True)
@@ -713,21 +801,21 @@ def main():
                     if success and delete_dec:
                         try:
                             decrypted_path.unlink()
-                            logger.info(
+                            log("info",
                                 f"✓ Copia de respaldo .dec eliminada: {decrypted_path}"
                             )
                         except Exception as e:
-                            logger.warning(f"No se pudo eliminar la copia .dec: {e}")
+                            log("warning",f"No se pudo eliminar la copia .dec: {e}")
                     elif not success:
                         logger.warning(
                             "La verificación falló, se mantiene la copia .dec para inspección"
                         )
                 else:
                     # No se puede verificar sin archivo original
-                    logger.warning(
+                    log("warning", 
                         f"No se encontró el archivo original para verificar: {original_path}"
                     )
-                    logger.warning("Se mantiene la copia .dec")
+                    log("warning", "Se mantiene la copia .dec")
 
         # ---- Comando: verify ----
         elif args.command == "verify":
@@ -737,11 +825,11 @@ def main():
 
     except KeyboardInterrupt:
         # Manejo de interrupción por usuario (Ctrl+C)
-        logger.error("\n[!] Operación interrumpida por el usuario")
+        log("error", "\n[!] Operación interrumpida por el usuario")
         sys.exit(1)
     except Exception as e:
         # Manejo de errores generales
-        logger.error(f"[!] Error: {e}")
+        log("error", f"[!] Error: {e}")
         sys.exit(1)
 
 

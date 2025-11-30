@@ -2,11 +2,11 @@
  Collection of cryptographic algorithm implementations in CLI tools
 
 ---
-## AES_Encriptor.py 
+## AES-CGM File Encriptor
 #### Usage
 
 ```
-CryptoTool.py [-h] [--keyfile KEYFILE] [--chunk-size CHUNK_SIZE] [--log-file LOG_FILE] {genkey,encrypt,decrypt,verify,listkeys}
+AES_Encrypt.py [-h] [--keyfile KEYFILE] [--chunk-size CHUNK_SIZE] [--log-file LOG_FILE] {genkey,encrypt,decrypt,verify,listkeys}
 ```
 
 
