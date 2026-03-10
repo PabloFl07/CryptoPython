@@ -17,7 +17,8 @@ import argparse
 import getpass
 from pathlib import Path
 from keys import KeyManager
-
+from run import Run
+from keys import PasswordSource, FileSource
 
 #───────────────────────────────────────────────────────────────────────────────────────────────
 #───────────────────────────────────────────────────────────────────────────────────────────────
@@ -52,12 +53,20 @@ class Commands:
     @staticmethod
     def encrypt(args):
 
-        source = args.keyfile if args.keyfile else getpass.getpass("Provide a password: ")
+        if args.keyfile:
+            source = FileSource(Path(args.keyfile))
+        else:
+            source = PasswordSource(getpass.getpass("Provide a password: "))
 
         in_path = Path(args.file)
+
+        if not in_path.exists():
+            raise FileNotFoundError("File to encrypt not found")
+        
         out_path = Path(args.output) if args.output else None
 
-        # Run.encrypt(in, out,source, get_cipher(args)) ( Example )
+
+        #Run.encrypt(in_path, out_path ,source, get_cipher(args))
 
     
     @staticmethod
@@ -89,7 +98,7 @@ def parse_args():
         nargs="?",
         const=KeyManager._DEFAULT_KEY_FILE,  
         default=None,  # VALUE IF NOT CALLED 
-        help="Path to the key file" # ! Wrong description
+        help="Where to generate the key ( current if empty )"
     )
     p.add_argument("--force", action="store_true")
 
@@ -147,8 +156,6 @@ def parse_args():
 
 def main():
     args  = parse_args()
-
-    # run = Run() ( Example ) | # ! Instance class to execute the logic of each Command based on the data we obtain
 
     try:
         result = args.func(args)

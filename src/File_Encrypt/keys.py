@@ -8,6 +8,10 @@ from pathlib import Path
 from abc import ABC, abstractmethod
 
 
+class InvalidKeyError(Exception):
+    pass
+
+
 class KeyManager:
     _KEY_LENGTH = 32
     _DEFAULT_MTIME_TOL = 24 * 60 * 60  # 4 horas
@@ -25,8 +29,8 @@ class KeyManager:
 
         if not isinstance(value, Path):
             if not isinstance(value, str):
-                raise TypeError("Cannot convert non-str type to Path")
-            raise TypeError("")  # ! Dont even know what to say
+                raise TypeError(f"Expected Path, got {type(value).__name__}")
+
 
         if value.is_dir():
             raise ValueError("Path must be a file, not a directory")
@@ -44,13 +48,11 @@ class KeyManager:
                 f"Key `{self.path.name}` already exists at `{self.path.parent}` | Use --force to overwrite."
             )
 
-        # Crear directorio con permisos 700
         self.path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(self.path.parent, 0o700)
 
         key = secrets.token_bytes(32)
 
-        # Escribir archivo y ajustar permisos inmediatamente
         self.path.write_bytes(key)
         self.path.chmod(0o600)
 
@@ -88,10 +90,13 @@ class KeyManager:
             raise TypeError("Key must be bytes")
 
         if len(key) != 32:
-            raise KeyError(
-                f"Invalid length. Expected: {len(key)}"
-            )  # ! Add custom error
-
+            raise InvalidKeyError(
+                f"Invalid length. Expected 32, got {len(key)}"
+            ) 
+        
+#───────────────────────────────────────────────────────────────────────────────────────────────
+#───────────────────────────────────────────────────────────────────────────────────────────────
+#───────────────────────────────────────────────────────────────────────────────────────────────
 
 class KeySource(ABC):
     @abstractmethod
@@ -99,7 +104,6 @@ class KeySource(ABC):
 
     @abstractmethod
     def get_salt(self) -> bytes: ...
-
 
 class PasswordSource(KeySource):
     def __init__(self, password: str):
@@ -112,7 +116,6 @@ class PasswordSource(KeySource):
 
     def get_salt(self):
         return self._salt
-
 
 class FileSource(KeySource):
     def __init__(self, path: Path):
