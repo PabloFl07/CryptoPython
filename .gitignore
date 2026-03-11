@@ -1,3 +1,5 @@
 .testing
 .venv
 **/__pycache__
+test/test.py
+**/__init__.py
