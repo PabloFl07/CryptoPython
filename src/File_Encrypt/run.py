@@ -32,7 +32,9 @@ class Run:
         salt = key_source.get_salt()  # Into the File Header
         key = key_source.get_key()
 
-        engine = CipherEngine(key, cipher[0], cipher[1])
+        cipher , cipher_id = cipher
+
+        engine = CipherEngine(key, cipher, cipher_id)
 
         engine.encrypt_file(in_file, out_file, salt)
 

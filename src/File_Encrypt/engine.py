@@ -10,26 +10,26 @@ class CipherEngine:
         self.cipher_id = cipher_id
 
     def encrypt_file(
-        self, file_path: Path, output_path: Path = None, password_salt: bytes = None
+        self, input_path: Path, output_path: Path = None, password_salt: bytes = None
     ):
-        if not file_path.exists():
-            raise FileNotFoundError(f"No existe: {file_path}")
+        if not input_path.exists():
+            raise FileNotFoundError(f"No existe: {input_path}")
 
-        out_p = output_path if output_path else file_path.with_suffix(".enc")
+        output_path = output_path if output_path else input_path.with_suffix(".enc")
 
         nonce_salt = secrets.token_bytes(32)
 
         try:
             header = FileHeader(
-                self.cipher_id, nonce_salt, password_salt, len(file_path.name)
+                self.cipher_id, nonce_salt, password_salt, len(input_path.name)
             )
 
-            with open(out_p, "wb") as f_out:
-                f_out.write(header.pack())
-                f_out.write(file_path.name.encode("utf-8"))
+            with open(output_path, "wb") as output_file:
+                output_file.write(header.pack())
+                output_file.write(input_path.name.encode("utf-8"))
 
-            return out_p
+            return output_path
         except Exception :
-            if out_p.exists():
-                out_p.unlink(missing_ok=True)
+            if output_path.exists():
+                output_path.unlink(missing_ok=True)
             raise

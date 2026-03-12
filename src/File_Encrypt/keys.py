@@ -14,14 +14,14 @@ class InvalidKeyError(Exception):
 
 class KeyManager:
     _KEY_LENGTH = 32
-    _DEFAULT_MTIME_TOL = 24 * 60 * 60  # 4 horas
+    _DEFAULT_MTIME_TOL = 24 * 60 * 60  # 24 hours | Last time modified
     _ITERATIONS = 600000
 
     _DEFAULT_KEY_DIR = Path.home() / ".secret"
     _DEFAULT_KEY_FILE = _DEFAULT_KEY_DIR / "secret.key"
 
     @property
-    def path(self):
+    def path(self) -> Path:
         return self._path
 
     @path.setter
@@ -31,17 +31,16 @@ class KeyManager:
             if not isinstance(value, str):
                 raise TypeError(f"Expected Path, got {type(value).__name__}")
 
-
         if value.is_dir():
             raise ValueError("Path must be a file, not a directory")
 
-        self._path = value
+        self._path = Path(value) if isinstance(value, str) else value
 
     def __init__(self, path: Path = None):
 
         self.path = Path(path) if path else KeyManager._DEFAULT_KEY_FILE
 
-    def generate_key(self, force: bool = False) -> bool:
+    def generate_key(self, force: bool = False) -> Path:
 
         if self.path.exists() and not force:
             raise FileExistsError(
@@ -75,28 +74,18 @@ class KeyManager:
         return key
 
     @staticmethod
-    def derive_key(password: str, salt: bytes) -> bytes:
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=KeyManager._ITERATIONS,
-        )
-        return kdf.derive(password.encode())
-
-    @staticmethod
     def validate_key(key: bytes) -> None:
         if not isinstance(key, bytes):
             raise TypeError("Key must be bytes")
 
         if len(key) != 32:
-            raise InvalidKeyError(
-                f"Invalid length. Expected 32, got {len(key)}"
-            ) 
-        
-#───────────────────────────────────────────────────────────────────────────────────────────────
-#───────────────────────────────────────────────────────────────────────────────────────────────
-#───────────────────────────────────────────────────────────────────────────────────────────────
+            raise InvalidKeyError(f"Invalid length. Expected 32, got {len(key)}")
+
+
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────────────────────────
+
 
 class KeySource(ABC):
     @abstractmethod
@@ -105,17 +94,28 @@ class KeySource(ABC):
     @abstractmethod
     def get_salt(self) -> bytes: ...
 
+
 class PasswordSource(KeySource):
     def __init__(self, password: str):
         self._salt = secrets.token_bytes(32)
         self._password = password
 
-    def get_key(self, existing_salt: bytes | None = None):
-        salt = existing_salt if existing_salt is not None else self._salt
-        return KeyManager.derive_key(self._password, salt)
+    def derive_key(self, salt: bytes) -> bytes:
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=KeyManager._ITERATIONS,
+        )
+        return kdf.derive(self.password.encode())
 
-    def get_salt(self):
+    def get_key(self, existing_salt: bytes | None = None) -> bytes:
+        salt = existing_salt if existing_salt is not None else self._salt
+        return self.derive_key(self._password, salt)
+
+    def get_salt(self) -> bytes:
         return self._salt
+
 
 class FileSource(KeySource):
     def __init__(self, path: Path):
@@ -125,4 +125,4 @@ class FileSource(KeySource):
         return self._manager.load_key()
 
     def get_salt(self) -> bytes:
-        return b"\x00" * 32
+        return b"\x00" * 32 # Empty salt

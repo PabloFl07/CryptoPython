@@ -48,14 +48,14 @@ class Commands:
         else:
             source = PasswordSource(getpass.getpass("Provide a password: "))
 
-        in_path = Path(args.file)
+        input_path = Path(args.file)
 
-        if not in_path.exists():
+        if not input_path.exists():
             raise FileNotFoundError("File to encrypt not found")
 
-        out_path = Path(args.output) if args.output else None
+        output_path = Path(args.output) if args.output else None
 
-        Run.encrypt(in_path, out_path, source, Run.get_cipher(args))
+        Run.encrypt(input_path, output_path, source, Run.get_cipher(args))
 
     @staticmethod
     def decrypt(args):
