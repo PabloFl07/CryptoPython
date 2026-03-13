@@ -6,15 +6,13 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305, AESGCM
 
 
 class Run:
-
-
     # Aux function to translate from an empty argument input ( -a / -c ) to a flag
     @staticmethod
     def get_cipher(args) -> str:
 
         CIPHER_DISPATCH = {
-        "a": (AESGCM, 1),
-        "c": (ChaCha20Poly1305, 2),
+            "a": (AESGCM, 1),
+            "c": (ChaCha20Poly1305, 2),
         }
 
         for flag, cipher in CIPHER_DISPATCH.items():
@@ -32,16 +30,20 @@ class Run:
         salt = key_source.get_salt()  # Into the File Header
         key = key_source.get_key()
 
-        cipher , cipher_id = cipher
+        cipher, cipher_id = cipher
 
-        engine = CipherEngine(key, cipher, cipher_id)
+        engine = CipherEngine(key, cipher(key), cipher_id)
 
         engine.encrypt_file(in_file, out_file, salt)
 
     @staticmethod
-    def decrypt(in_file: Path, out_file: Path, key_source: KeySource):
+    def decrypt(input_path: Path, output_path: Path, key_source: KeySource):
 
-        header, key, cipher , name = FileHeader.read_metadata(in_file, key_source)
+        header, key, cipher, name = FileHeader.read_metadata(input_path, key_source)
+
+        engine = CipherEngine(key, cipher(key), header.algorithm_id)
+
+        engine.decrypt_file(input_path, output_path, header.nonce_salt, name)
 
     @staticmethod
     def verify(original, decrypted, algorithm):

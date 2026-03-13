@@ -46,7 +46,8 @@ class FileHeader:
         )
 
     @classmethod
-    def read_metadata(cls, input_path : Path, key_source : KeySource) -> tuple:
+    def read_metadata(cls, input_path: Path, key_source: KeySource) -> tuple:
+
         with open(input_path, "rb") as input_file:
             fixed_header_data = input_file.read(cls.size())
             header = cls.unpack(fixed_header_data)
@@ -54,7 +55,7 @@ class FileHeader:
 
             key = key_source.get_key(existing_salt=header.password_salt)
 
-            cipher = cls.read_cipher(header.algorithm_id)(key)
+            cipher = cls.read_cipher(header.algorithm_id)
 
         return header, key, cipher, file_name
 

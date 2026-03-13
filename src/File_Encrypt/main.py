@@ -64,14 +64,14 @@ class Commands:
         else:
             source = PasswordSource(getpass.getpass("Provide a password: "))
 
-        in_path = Path(args.file)
+        input_path = Path(args.file)
 
-        if not in_path.exists():
+        if not input_path.exists():
             raise FileNotFoundError("File to encrypt not found")
 
-        out_path = Path(args.output) if args.output else None
+        output_path = Path(args.output) if args.output else None
 
-        Run.decrypt(in_path, out_path, source)
+        Run.decrypt(input_path, output_path, source)
 
     @staticmethod
     def verify():
@@ -168,8 +168,6 @@ def main():
             print(result)
     except KeyboardInterrupt:
         print("\nCancelado.")
-    except Exception as e:
-        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

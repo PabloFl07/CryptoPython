@@ -4,13 +4,10 @@ import time
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from pathlib import Path
-
 from abc import ABC, abstractmethod
-
 
 class InvalidKeyError(Exception):
     pass
-
 
 class KeyManager:
     _KEY_LENGTH = 32
@@ -86,14 +83,12 @@ class KeyManager:
 # ───────────────────────────────────────────────────────────────────────────────────────────────
 # ───────────────────────────────────────────────────────────────────────────────────────────────
 
-
 class KeySource(ABC):
     @abstractmethod
     def get_key(self, existing_salt: bytes | None = None) -> bytes: ...
 
     @abstractmethod
     def get_salt(self) -> bytes: ...
-
 
 class PasswordSource(KeySource):
     def __init__(self, password: str):
@@ -107,15 +102,14 @@ class PasswordSource(KeySource):
             salt=salt,
             iterations=KeyManager._ITERATIONS,
         )
-        return kdf.derive(self.password.encode())
+        return kdf.derive(self._password.encode())
 
     def get_key(self, existing_salt: bytes | None = None) -> bytes:
         salt = existing_salt if existing_salt is not None else self._salt
-        return self.derive_key(self._password, salt)
+        return self.derive_key(salt)
 
     def get_salt(self) -> bytes:
         return self._salt
-
 
 class FileSource(KeySource):
     def __init__(self, path: Path):
@@ -125,4 +119,4 @@ class FileSource(KeySource):
         return self._manager.load_key()
 
     def get_salt(self) -> bytes:
-        return b"\x00" * 32 # Empty salt
+        return b"\x00" * 32  # Empty salt
