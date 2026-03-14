@@ -74,12 +74,16 @@ class Commands:
         Run.decrypt(input_path, output_path, source)
 
     @staticmethod
-    def verify():
-        raise NotImplementedError()
+    def verify(args):
+        if Run.verify(Path(args.original), Path(args.decrypted), args.algorithm):
+            print("Integrity verified: The files are identical.")
+            return
+        print("Integrity verification failed: The files differ.")
+        
 
     @staticmethod
-    def hash():
-        raise NotImplementedError()
+    def hash(args):
+        return Run.hash(Path(args.file), args.algorithm)
 
 
 # ───────────────────────────────────────────────────────────────────────────────────────────────

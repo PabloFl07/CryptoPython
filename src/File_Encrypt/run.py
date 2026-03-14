@@ -1,3 +1,4 @@
+from integrity import Integrity
 from keys import KeySource
 from pathlib import Path
 from engine import CipherEngine
@@ -47,8 +48,9 @@ class Run:
 
     @staticmethod
     def verify(original, decrypted, algorithm):
-        raise NotImplementedError()
+        integrity = Integrity(original, decrypted, algorithm)
+        return integrity.verify_integrity()
 
     @staticmethod
     def hash(file, algorithm):
-        raise NotImplementedError()
+        return f"{algorithm.lower().replace('-', '')} Hash: {Integrity.hash_file(file, algorithm)}"
