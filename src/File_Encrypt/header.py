@@ -1,25 +1,23 @@
 import struct
-from pathlib import Path
-from keys import KeySource
 from dataclasses import dataclass
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 
 
 @dataclass
 class FileHeader:
-    # Formato: ! (Network/Big-endian) 4s (Magic) B (Alg) 32s (nonce_salt) H (NameLen) 32s ( password_salt )
-    # Total: 4 + 1 + 1 + 4 + 32 + 2 = 44 bytes
-    STRUCT_FORMAT = "!5sB 32s 32s H"
+    # Total: 5 + 1 + 32 + 32 + 2 = 72 bytes
+    STRUCT_FORMAT = "!5sB32s32sH"
     MAGIC = b"Olesa"
 
-    # IDs de algoritmos
     AESGCM_ID = 1
     CHACHA20_ID = 2
 
     algorithm_id: int
     nonce_salt: bytes
-    password_salt: bytes
+    password_salt: bytes | None
     name_len: int
+
+    _CIPHER_MAP = {1: AESGCM, 2: ChaCha20Poly1305}
 
     def pack(self) -> bytes:
 
@@ -46,24 +44,9 @@ class FileHeader:
         )
 
     @classmethod
-    def read_metadata(cls, input_path: Path, key_source: KeySource) -> tuple:
-
-        with open(input_path, "rb") as input_file:
-            fixed_header_data = input_file.read(cls.size())
-            header = cls.unpack(fixed_header_data)
-            file_name = input_file.read(header.name_len).decode("utf-8")
-
-            key = key_source.get_key(existing_salt=header.password_salt)
-
-            cipher = cls.read_cipher(header.algorithm_id)
-
-        return header, key, cipher, file_name
-
-    @classmethod
     def read_cipher(cls, algorithm_id: int):
-        CIPHERS = {cls.AESGCM_ID: AESGCM, cls.CHACHA20_ID: ChaCha20Poly1305}
-        return CIPHERS[algorithm_id]
+        return cls._CIPHER_MAP[algorithm_id]
 
     @classmethod
-    def size(cls) -> bytes:
+    def size(cls) -> int:
         return struct.calcsize(cls.STRUCT_FORMAT)

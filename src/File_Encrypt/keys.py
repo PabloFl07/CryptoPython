@@ -6,16 +6,21 @@ from cryptography.hazmat.primitives import hashes
 from pathlib import Path
 from abc import ABC, abstractmethod
 
+
 class InvalidKeyError(Exception):
     pass
+
 
 class KeyManager:
     _KEY_LENGTH = 32
     _DEFAULT_MTIME_TOL = 24 * 60 * 60  # 24 hours | Last time modified
-    _ITERATIONS = 600000
+    _ITERATIONS = 600_000
 
     _DEFAULT_KEY_DIR = Path.home() / ".secret"
     _DEFAULT_KEY_FILE = _DEFAULT_KEY_DIR / "secret.key"
+
+    def __init__(self, path: Path = None):
+        self.path = self.path = path or self._DEFAULT_KEY_FILE
 
     @property
     def path(self) -> Path:
@@ -24,18 +29,13 @@ class KeyManager:
     @path.setter
     def path(self, value):
 
-        if not isinstance(value, Path):
-            if not isinstance(value, str):
-                raise TypeError(f"Expected Path, got {type(value).__name__}")
+        if not isinstance(value, (Path, str)):
+            raise TypeError(f"Expected Path or str, got {type(value).__name__}")
 
         if value.is_dir():
             raise ValueError("Path must be a file, not a directory")
 
         self._path = Path(value) if isinstance(value, str) else value
-
-    def __init__(self, path: Path = None):
-
-        self.path = Path(path) if path else KeyManager._DEFAULT_KEY_FILE
 
     def generate_key(self, force: bool = False) -> Path:
 
@@ -57,9 +57,8 @@ class KeyManager:
     def load_key(self) -> bytes:
 
         if not self.path.exists():
-            raise FileNotFoundError(f"Couldnt find key file: {self.path}")
+            raise FileNotFoundError(f"Couldn't find key file: {self.path}")
 
-        # Verificación de rotación (mtime)
         mtime = self.path.stat().st_mtime
         if (time.time() - mtime) > self._DEFAULT_MTIME_TOL:
             print(
@@ -83,6 +82,7 @@ class KeyManager:
 # ───────────────────────────────────────────────────────────────────────────────────────────────
 # ───────────────────────────────────────────────────────────────────────────────────────────────
 
+
 class KeySource(ABC):
     @abstractmethod
     def get_key(self, existing_salt: bytes | None = None) -> bytes: ...
@@ -90,19 +90,31 @@ class KeySource(ABC):
     @abstractmethod
     def get_salt(self) -> bytes: ...
 
+
 class PasswordSource(KeySource):
     def __init__(self, password: str):
         self._salt = secrets.token_bytes(32)
-        self._password = password
+        self._password = bytearray(password.encode())
+
+    def _clear_password(self):
+        # Overwrite the bytearray before clearing reference
+        for i in range(len(self._password)):
+            self._password[i] = 0
+        self._password = bytearray()
 
     def derive_key(self, salt: bytes) -> bytes:
+        if not self._password:
+            raise RuntimeError("Password already consumed")
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=salt,
             iterations=KeyManager._ITERATIONS,
         )
-        return kdf.derive(self._password.encode())
+        try:
+            return kdf.derive(bytes(self._password))
+        finally:
+            self._clear_password()
 
     def get_key(self, existing_salt: bytes | None = None) -> bytes:
         salt = existing_salt if existing_salt is not None else self._salt
@@ -110,6 +122,7 @@ class PasswordSource(KeySource):
 
     def get_salt(self) -> bytes:
         return self._salt
+
 
 class FileSource(KeySource):
     def __init__(self, path: Path):

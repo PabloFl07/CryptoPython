@@ -1,35 +1,23 @@
-"""
-- main function
-- Argument parsing
-- Entry Point for the script flow
-    Using a function for every "Command"
-
-# TODO:
-    - Complete each Command argument parsing
-
-
-
-    -genkey arg parsing and implemented
-    -kf argument changed scope from global arg to encrypt / decrypt arg
-
-"""
-
 import argparse
 import getpass
 from pathlib import Path
-from keys import KeyManager
+from keys import FileSource, InvalidKeyError, KeyManager, PasswordSource
 from run import Run
-from keys import PasswordSource, FileSource
-
-# ───────────────────────────────────────────────────────────────────────────────────────────────
-# ───────────────────────────────────────────────────────────────────────────────────────────────
-# ───────────────────────────────────────────────────────────────────────────────────────────────
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305, AESGCM
 
 
 class Commands:
     """
     Entry point after argument parsing. Retrieves the data and calls Run class to handle it.
     """
+
+    @staticmethod
+    def get_source(args):
+        return (
+            FileSource(Path(args.keyfile))
+            if args.keyfile
+            else PasswordSource(getpass.getpass("Provide a password: "))
+        )
 
     @staticmethod
     def genkey(args):
@@ -39,14 +27,10 @@ class Commands:
         key_manager.generate_key(force=args.force)
         return f"Key created successfully at `{key_manager.path}`"
 
-    # * Correctly parsers !
     @staticmethod
     def encrypt(args):
 
-        if args.keyfile:
-            source = FileSource(Path(args.keyfile))
-        else:
-            source = PasswordSource(getpass.getpass("Provide a password: "))
+        source = Commands.get_source(args)
 
         input_path = Path(args.file)
 
@@ -55,22 +39,17 @@ class Commands:
 
         output_path = Path(args.output) if args.output else None
 
-        Run.encrypt(input_path, output_path, source, Run.get_cipher(args))
+        cipher = (ChaCha20Poly1305, 2) if args.c else (AESGCM, 1)
+
+        Run.encrypt(input_path, output_path, source, cipher)
 
     @staticmethod
     def decrypt(args):
-        if args.keyfile:
-            source = FileSource(Path(args.keyfile))
-        else:
-            source = PasswordSource(getpass.getpass("Provide a password: "))
+
+        source = Commands.get_source(args)
 
         input_path = Path(args.file)
-
-        if not input_path.exists():
-            raise FileNotFoundError("File to encrypt not found")
-
         output_path = Path(args.output) if args.output else None
-
         Run.decrypt(input_path, output_path, source)
 
     @staticmethod
@@ -79,16 +58,10 @@ class Commands:
             print("Integrity verified: The files are identical.")
             return
         print("Integrity verification failed: The files differ.")
-        
 
     @staticmethod
     def hash(args):
         return Run.hash(Path(args.file), args.algorithm)
-
-
-# ───────────────────────────────────────────────────────────────────────────────────────────────
-# ───────────────────────────────────────────────────────────────────────────────────────────────
-# ───────────────────────────────────────────────────────────────────────────────────────────────
 
 
 def parse_args():
@@ -150,14 +123,14 @@ def parse_args():
     p.add_argument("-a", "--algorithm", default="sha256")
 
     # Sets the target function of the command
-    for p, cmd in [
+    for cmd_name, cmd_func in [
         ("genkey", Commands.genkey),
         ("encrypt", Commands.encrypt),
         ("decrypt", Commands.decrypt),
         ("verify", Commands.verify),
         ("hash", Commands.hash),
     ]:
-        sub.choices[p].set_defaults(func=cmd)
+        sub.choices[cmd_name].set_defaults(func=cmd_func)
 
     return parser.parse_args()
 
@@ -167,11 +140,17 @@ def main():
 
     try:
         result = args.func(args)
-
-        if result:
+        if result is not None:
             print(result)
+
     except KeyboardInterrupt:
-        print("\nCancelado.")
+        print("\nCanceled.")
+    except (ValueError, FileNotFoundError, InvalidKeyError) as e:
+        print(f"\nError: {e}")
+        exit(1)
+    except Exception as e:
+        print(f"\nUnexpected error: {e}")
+        exit(2)
 
 
 if __name__ == "__main__":
