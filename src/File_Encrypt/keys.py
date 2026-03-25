@@ -20,7 +20,7 @@ class KeyManager:
     _DEFAULT_KEY_FILE = _DEFAULT_KEY_DIR / "secret.key"
 
     def __init__(self, path: Path = None):
-        self.path = self.path = path or self._DEFAULT_KEY_FILE
+        self.path = path or self._DEFAULT_KEY_FILE
 
     @property
     def path(self) -> Path:
@@ -28,14 +28,16 @@ class KeyManager:
 
     @path.setter
     def path(self, value):
-
         if not isinstance(value, (Path, str)):
             raise TypeError(f"Expected Path or str, got {type(value).__name__}")
 
-        if value.is_dir():
+
+        path = Path(value) if isinstance(value, str) else value
+
+        if path.is_dir():
             raise ValueError("Path must be a file, not a directory")
 
-        self._path = Path(value) if isinstance(value, str) else value
+        self._path = path
 
     def generate_key(self, force: bool = False) -> Path:
 
