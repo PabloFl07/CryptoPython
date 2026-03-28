@@ -12,7 +12,7 @@ class KeyManager:
     _DEFAULT_KEY_DIR = Path.home() / "Dev" / "CryptoPython" / "keys" 
     _DEFAULT_KEY_FILE = _DEFAULT_KEY_DIR / "private.key"
 
-    def __init__(self, path ):
+    def __init__(self, path : Path = None):
         self.path = path or self._DEFAULT_KEY_FILE
 
     @property
@@ -24,7 +24,7 @@ class KeyManager:
         if not isinstance(value, (Path, str)):
             raise TypeError(f"Expected Path or str, got {type(value).__name__}")
 
-        self._path = Path(value) if isinstance(value, str) else value
+        self._path = Path(value)
 
 
     def generate_key(self) -> Path:
@@ -44,7 +44,7 @@ class KeyManager:
                     raw_key.private_bytes(
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.BestAvailableEncryption(bytes(password))
+                    encryption_algorithm=serialization.BestAvailableEncryption(bytes(password)),
                 )
             )
 
@@ -70,16 +70,31 @@ class KeyManager:
             raise ValueError("Path must be a file, not a directory")
         if not self.path.exists():
             raise FileNotFoundError("Key File not found")
+        
+
+        password = bytearray(getpass("Provide the password to load the private key: ").encode("utf-8"))
+
         try:
-            password = getpass("Provide the password to load the private key: ").encode("utf-8")
             with open(self.path, "rb") as key_file:
                 private_key = serialization.load_pem_private_key(
                 key_file.read(),
-                password=password 
+                password=bytes(password),
             )
 
             return private_key
         
         except ValueError as e:
             raise ValueError("Incorrect password.") from e
+        
+        finally:
+            for i in range(len(password)):
+                password[i] = 0
+
+    def get_public_key(self) -> bytes:
+        private_key = self.load_key()
+        public_key = private_key.public_key()
+        return public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
 

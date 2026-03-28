@@ -16,8 +16,10 @@ class Commands:
         return f"Key created successfully at `{manager.path}`"
 
     @staticmethod
-    def _(args):
-        raise NotImplementedError()
+    def pub(args):
+        manager = KeyManager(args.path)
+
+        print(manager.get_public_key().decode())
 
     @staticmethod
     def _(args):
@@ -43,9 +45,19 @@ def parse_args():
         help="Where to generate the key ( current if empty )",
     )
 
+    p = sub.add_parser("pub")
+    p.add_argument(
+        "path",
+        nargs="?",
+        const=str(KeyManager._DEFAULT_KEY_FILE),
+        default=None,  # VALUE IF NOT CALLED
+        help="Where to generate the key ( current if empty )",
+    )
+
     # Sets the target function of the command
     for cmd_name, cmd_func in [
-        ("genkey", Commands.genkey)
+        ("genkey", Commands.genkey),
+        ("pub", Commands.pub)
     ]:
         sub.choices[cmd_name].set_defaults(func=cmd_func)
 
