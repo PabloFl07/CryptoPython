@@ -53,7 +53,7 @@ class KeyManager:
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(key)
-            except:
+            except Exception:
                 os.unlink(self.path)  
                 raise
         finally:
@@ -90,11 +90,15 @@ class KeyManager:
             for i in range(len(password)):
                 password[i] = 0
 
-    def get_public_key(self) -> bytes:
+    def get_public_key(self, output_path : Path = None) -> Path:
         private_key = self.load_key()
-        public_key = private_key.public_key()
-        return public_key.public_bytes(
+        public_key = private_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
+
+        out = output_path or self.path.with_suffix(".pub")
+        out.write_bytes(public_key)
+        return out     
+
 

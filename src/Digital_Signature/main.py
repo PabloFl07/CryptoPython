@@ -19,7 +19,8 @@ class Commands:
     def pub(args):
         manager = KeyManager(args.path)
 
-        print(manager.get_public_key().decode())
+        manager.get_public_key()
+
 
     @staticmethod
     def _(args):
