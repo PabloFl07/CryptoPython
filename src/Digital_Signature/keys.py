@@ -1,6 +1,6 @@
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 from pathlib import Path
 from getpass import getpass
@@ -21,11 +21,10 @@ class KeyManager:
 
     @path.setter
     def path(self, value):
-        if not isinstance(value, (Path, str)):
-            raise TypeError(f"Expected Path or str, got {type(value).__name__}")
-
-        self._path = Path(value)
-
+        try:
+            self._path = Path(value)
+        except TypeError:
+            raise TypeError(f"Expected a valid path object or string, got {type(value).__name__}")
 
     def generate_key(self) -> Path:
         if self.path.is_dir():
@@ -48,12 +47,13 @@ class KeyManager:
                 )
             )
 
-        # os.open return a file descriptor. Wich represents the open file at OS level 
-            fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            # os.open returns a file descriptor. Which represents the open file at OS level 
+            file_descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
-                with os.fdopen(fd, "wb") as f:
+                with os.fdopen(file_descriptor, "wb") as f:
                     f.write(key)
             except Exception:
+                os.close(file_descriptor)
                 os.unlink(self.path)  
                 raise
         finally:
@@ -83,22 +83,28 @@ class KeyManager:
 
             return private_key
         
-        except ValueError as e:
-            raise ValueError("Incorrect password.") from e
+        except (ValueError, TypeError) as e:
+            raise ValueError("Incorrect password or corrupted key file.") from e
+        except UnsupportedAlgorithm as e:
+            raise ValueError(f"Unsupported key type: {e}") from e
         
         finally:
             for i in range(len(password)):
                 password[i] = 0
 
-    def get_public_key(self, output_path : Path = None) -> Path:
+    def get_public_key(self):
         private_key = self.load_key()
         public_key = private_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
+        return public_key
+
+    def export_public_key(self, output_path : Path = None) -> Path:
+        public_key = self.get_public_key()
 
         out = output_path or self.path.with_suffix(".pub")
         out.write_bytes(public_key)
-        return out     
+        return out    
 
 
