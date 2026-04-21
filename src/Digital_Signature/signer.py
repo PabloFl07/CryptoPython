@@ -31,7 +31,7 @@ def _hash_file(file_path: Path) -> str:
 
 class Envelope(ABC):
     def __init__(self, signature: bytes, pubkey: str, timestamp: str):
-        self.signature       = signature      
+        self.signature = signature      
         self.pubkey    = pubkey
         self.timestamp = timestamp
 
@@ -88,9 +88,12 @@ class Inline(Envelope):
         }
     
 class Clearsign(Envelope):
-    def __init__(self, content: str, signature: bytes, timestamp: str):
-        super().__init__(signature, timestamp)
+    def __init__(self, content: str, signature: bytes, pubkey, timestamp: str):
+        super().__init__(signature, pubkey, timestamp)
         self.content = content
+
+    def to_dict(self):
+        return super().to_dict()
 
     def to_text(self) -> str:   # to_dict no aplica aquí, mejor to_text
         return (
@@ -156,14 +159,14 @@ class Signer():
         The original file is never modified.
         """
 
-        if input_path.stat().st_size > self.MAX_FILE_SIZE:
-            raise ValueError(f"File too large for Ed25519 full-message signing. Max: {self.MAX_FILE_SIZE / (1024 * 1024):.0f} MB")
+        if input_path.stat().st_size > self._MAX_FILE_SIZE:
+            raise ValueError(f"File too large for Ed25519 full-message signing. Max: {self._MAX_FILE_SIZE / (1024 * 1024):.0f} MB")
 
         data = input_path.read_bytes()
         signature_bytes = self._key.sign(data)
         digest_hex = hashlib.sha256(data).hexdigest()
 
-        output_path = output_path or input_path.with_suffix(input_path.suffix + ".sig.json")
+        output_path = output_path or input_path.with_suffix(".sig.json")
 
         try:
             file_descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -192,8 +195,8 @@ class Signer():
         The signature is over the raw file bytes (before base64 encoding).
         """
 
-        if input_path.stat().st_size > self.MAX_FILE_SIZE:
-            raise ValueError(f"File too large for Ed25519 full-message signing. Max: {self.MAX_FILE_SIZE / (1024 * 1024):.0f} MB")
+        if input_path.stat().st_size > self._MAX_FILE_SIZE:
+            raise ValueError(f"File too large for Ed25519 full-message signing. Max: {self._MAX_FILE_SIZE / (1024 * 1024):.0f} MB")
 
         data = input_path.read_bytes()
         signature_bytes = self._key.sign(data)
@@ -232,7 +235,7 @@ class Signer():
 
         output_path = output_path or input_path.with_suffix(".signed.txt")
        
-        envelope = Clearsign(content, signature, _now_iso())
+        envelope = Clearsign(content, signature, "",  _now_iso())
 
         try:
             file_descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
