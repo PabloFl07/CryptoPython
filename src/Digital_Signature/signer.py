@@ -1,109 +1,97 @@
-import base64
-import hashlib
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from abc import ABC, abstractmethod
+import utils
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
-def _public_key(private_key: Ed25519PrivateKey) -> str:
-    return private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode()
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def _hash_file(file_path: Path) -> str:
-    h = hashlib.sha256()
-    with open(file_path, "rb") as file:
-        for chunk in iter(lambda: file.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 class Envelope(ABC):
-    def __init__(self, signature: bytes, pubkey: str, timestamp: str):
-        self.signature = signature      
-        self.pubkey    = pubkey
-        self.timestamp = timestamp
-
-    @property
-    def sig_b64(self):
-        return base64.b64encode(self.signature).decode()
+    def __init__(self, signature: bytes, private_key: Ed25519PrivateKey):
+        self.signature = utils.b64_encode(signature)
+        self.pubkey = utils.format_public_key(private_key.public_key())
+        self.timestamp = utils.get_now_iso()
 
     @abstractmethod
-    def to_dict(self) -> dict: ... 
+    def to_dict(self) -> dict: ...
 
 
 class Detached(Envelope):
-    def __init__(self, filename: str, sha256: str, signature: bytes, pubkey: str, timestamp: str):
-        super().__init__(signature, pubkey, timestamp)
+    def __init__(
+        self,
+        filename: str,
+        sha256: str,
+        signature: bytes,
+        private_key: Ed25519PrivateKey,
+    ):
+        super().__init__(signature, private_key)
         self.filename = filename
-        self.sha256   = sha256
+        self.sha256 = sha256
 
     def to_dict(self) -> dict:
         return {
-            "mode":       "detached",
-            "filename":   self.filename,
-            "sha256":     self.sha256,
-            "signature":  self.sig_b64,
+            "mode": "detached",
+            "filename": self.filename,
+            "sha256": self.sha256,
+            "signature": self.signature,
             "public_key": self.pubkey,
-            "timestamp":  self.timestamp,
+            "timestamp": self.timestamp,
         }
+
 
 class Inline(Envelope):
-    """
-    Envelope format:
-        {
-        "mode":      "inline",
-        "filename":  "<original name>",
-        "data":      "<base64-encoded file content>",
-        "signature":       "<base64 Ed25519 signature over the raw file bytes>",
-        "public_key":    "<PEM public key>",
-        "timestamp": "<ISO-8601 UTC>"
-        }
-    """
-    def __init__(self, filename: str, data: bytes, sig: bytes, pubkey: str, timestamp: str):
-        super().__init__(sig, pubkey, timestamp)
+    """ """
+
+    def __init__(
+        self,
+        filename: str,
+        data: bytes,
+        signature: bytes,
+        private_key: Ed25519PrivateKey,
+    ):
+        super().__init__(signature, private_key)
         self.filename = filename
-        self.data     = data       
+        self.data = data
 
     def to_dict(self) -> dict:
-
         return {
-            "mode":       "inline",
-            "filename":   self.filename,
-            "data":       base64.b64encode(self.data).decode(),
-            "signature":  self.sig_b64,
+            "mode": "inline",
+            "filename": self.filename,
+            "data": utils.b64_encode(self.data),
+            "signature": self.signature,
             "public_key": self.pubkey,
-            "timestamp":  self.timestamp,
+            "timestamp": self.timestamp,
         }
-    
+
+
 class Clearsign(Envelope):
-    def __init__(self, content: str, signature: bytes, pubkey, timestamp: str):
-        super().__init__(signature, pubkey, timestamp)
+    def __init__(self, content: str, signature: bytes, private_key: Ed25519PrivateKey):
+        super().__init__(signature, private_key)
         self.content = content
+
+        _raw = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        self.pubkey_raw = utils.b64_encode(_raw)
+
 
     def to_dict(self):
         return super().to_dict()
 
-    def to_text(self) -> str:   # to_dict no aplica aquí, mejor to_text
+    def to_text(self) -> str:  # to_dict no aplica aquí, mejor to_text
         return (
             "-----BEGIN SIGNED TEXT-----\n"
             f"{self.content}\n"
             "-----BEGIN ED25519 SIGNATURE-----\n"
-            f"{self.sig_b64}\n"
+            f"Signature: {self.signature}\n"
+            f"Public key: {self.pubkey_raw}\n"
             f"Timestamp: {self.timestamp}\n"
             "-----END ED25519 SIGNATURE-----\n"
         )
+
 
 class Manifest(Envelope):
     """
@@ -119,20 +107,24 @@ class Manifest(Envelope):
         "timestamp": "<ISO-8601 UTC>"
           }
     """
-    def __init__(self, files: list[dict], signature: bytes, pubkey: str, timestamp: str):
-        super().__init__(signature, pubkey, timestamp)
+
+    def __init__(
+        self, files: list[dict], signature: bytes, private_key: Ed25519PrivateKey
+    ):
+        super().__init__(signature, private_key)
         self.files = files
 
     def to_dict(self) -> dict:
         return {
-            "mode":       "manifest",
-            "files":      self.files,
-            "signature":  self.sig_b64,
+            "mode": "manifest",
+            "files": self.files,
+            "signature": self.signature,
             "public_key": self.pubkey,
-            "timestamp":  self.timestamp,
+            "timestamp": self.timestamp,
         }
 
-class Signer():    
+
+class Signer:
     """
     Signs files using an Ed25519 private key.
 
@@ -149,6 +141,22 @@ class Signer():
             raise TypeError("Expected an Ed25519PrivateKey instance")
         self._key = private_key
 
+    @staticmethod
+    def _write_file(path: Path, content: str) -> Path:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception:
+            os.unlink(path)
+            raise
+        return path
+
+    @staticmethod
+    def to_file(path: Path, envelope: Envelope) -> Path:
+        """Serialize an Envelope to indented JSON and write it to a new file."""
+        return Signer._write_file(path, json.dumps(envelope.to_dict(), indent=2))
+
     # ------------------------------------------------------------------ #
     # Mode 1 — Detached                                                   #
     # ------------------------------------------------------------------ #
@@ -160,28 +168,27 @@ class Signer():
         """
 
         if input_path.stat().st_size > self._MAX_FILE_SIZE:
-            raise ValueError(f"File too large for Ed25519 full-message signing. Max: {self._MAX_FILE_SIZE / (1024 * 1024):.0f} MB")
+            raise ValueError(
+                f"File too large for Ed25519 full-message signing. Max: {self._MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
+            )
 
         data = input_path.read_bytes()
-        signature_bytes = self._key.sign(data)
-        digest_hex = hashlib.sha256(data).hexdigest()
+        signature = self._key.sign(data)
 
         output_path = output_path or input_path.with_suffix(".sig.json")
 
+        envelope = Detached(
+            input_path.name, utils.calculate_file_hash(input_path), signature, self._key
+        )
+
         try:
-            file_descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            Signer.to_file(output_path, envelope)
+
         except FileExistsError:
-            raise FileExistsError(f"Output file already exists: {output_path}. Remove it or specify a different path with --output.")
+            raise FileExistsError(
+                f"Output file already exists: {output_path}. Remove it or specify a different path with --output."
+            )
 
-        envelope = Detached(input_path.name, digest_hex, signature_bytes, _public_key(self._key), _now_iso())
-
-        try:
-            with os.fdopen(file_descriptor, "w", encoding="utf-8") as output_file:
-                output_file.write(json.dumps(envelope.to_dict(), indent=2))
-        except Exception:
-            os.unlink(output_path)
-            raise
-        
         return output_path
 
     # ------------------------------------------------------------------ #
@@ -196,28 +203,26 @@ class Signer():
         """
 
         if input_path.stat().st_size > self._MAX_FILE_SIZE:
-            raise ValueError(f"File too large for Ed25519 full-message signing. Max: {self._MAX_FILE_SIZE / (1024 * 1024):.0f} MB")
+            raise ValueError(
+                f"File too large for Ed25519 full-message signing. Max: {self._MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
+            )
 
         data = input_path.read_bytes()
-        signature_bytes = self._key.sign(data)
+        signature = self._key.sign(data)
 
         output_path = output_path or input_path.with_suffix(".jsig")
-
-        envelope = Inline(input_path.name, data, signature_bytes, _public_key(self._key), _now_iso())
+        envelope = Inline(input_path.name, data, signature, private_key=self._key)
 
         try:
-            file_descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            Signer.to_file(output_path, envelope)
         except FileExistsError:
-            raise FileExistsError(f"Output file already exists: {output_path}. Remove it or specify a different path with --output.")
+            raise FileExistsError(
+                f"Output file already exists: {output_path}. "
+                "Remove it or specify a different path with --output."
+            )
 
-        try:
-            with os.fdopen(file_descriptor, "w", encoding="utf-8") as output_file:
-                output_file.write(json.dumps(envelope.to_dict(), indent=2))
-        except Exception:
-            os.unlink(output_path)
-            raise
         return output_path
-    
+
     # ------------------------------------------------------------------ #
     # Mode 4 — Clearsign (Texto Plano)                                   #
     # ------------------------------------------------------------------ #
@@ -229,33 +234,28 @@ class Signer():
         except UnicodeDecodeError:
             raise ValueError("Clearsign mode requires a valid UTF-8 text file")
 
-
         data = content.encode("utf-8")
         signature = self._key.sign(data)
 
         output_path = output_path or input_path.with_suffix(".signed.txt")
-       
-        envelope = Clearsign(content, signature, "",  _now_iso())
+        envelope = Clearsign(content, signature, private_key=self._key)
 
         try:
-            file_descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            Signer._write_file(output_path, envelope.to_text())
         except FileExistsError:
-            raise FileExistsError(f"Output file already exists: {output_path}. Remove it or specify a different path with --output.")
-
-        try:
-            with os.fdopen(file_descriptor, "w", encoding="utf-8") as output_file:
-                output_file.write(envelope.to_text())
-        except Exception:
-            os.unlink(output_path)
-            raise
+            raise FileExistsError(
+                f"Output file already exists: {output_path}. "
+                "Remove it or specify a different path with --output."
+            )
         return output_path
-
 
     # ------------------------------------------------------------------ #
     # Mode 3 — Manifest                                                   #
     # ------------------------------------------------------------------ #
 
-    def sign_manifest(self, input_paths: list[Path], output_path: Path = None) -> Path:
+    def sign_manifest(
+        self, base_dir: Path, output_path: Path = None, recursive: bool = None
+    ) -> Path:
         """
         Hash every file with SHA-256, sign the canonical manifest bytes,
         and write a manifest JSON.
@@ -265,37 +265,31 @@ class Signer():
         extra whitespace — this is what gets signed so verification is
         deterministic regardless of JSON serialiser.
         """
-        if not input_paths:
+        pattern = "**/*" if recursive else "*"
+        files = sorted(f for f in base_dir.glob(pattern) if f.is_file())
+
+        if not files:
             raise ValueError("File list is empty")
 
-        entries = []
-        for file_path in input_paths:
-            file_path = Path(file_path)
-            if not file_path.is_file():
-                raise FileNotFoundError(f"File not found: {file_path}")
-            relative_path = file_path.relative_to(input_paths[0].parent)
-            entries.append({"path": str(relative_path), "sha256": _hash_file(file_path)})
-
-        # Sort by path so the signed payload is deterministic
+        entries = [
+            {"path": str(f.relative_to(base_dir)), "sha256": utils.calculate_file_hash(f)}
+            for f in files
+        ]
+        # Already sorted by glob+sorted above, but make it explicit for clarity.
         entries.sort(key=lambda e: e["path"])
 
         canonical_bytes = json.dumps(entries, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        sig_bytes = self._key.sign(canonical_bytes)
+        signature       = self._key.sign(canonical_bytes)
 
         output_path = output_path or Path("manifest.json")
-
-        envelope = Manifest(entries, sig_bytes, _public_key(self._key), _now_iso())
+        envelope    = Manifest(entries, signature, private_key=self._key)
 
         try:
-            file_descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            Signer.to_file(output_path, envelope)
         except FileExistsError:
-            raise FileExistsError(f"Output file already exists: {output_path}. Remove it or specify a different path with --output.")
-
-        try:
-            with os.fdopen(file_descriptor, "w", encoding="utf-8") as output_file:
-                output_file.write(json.dumps(envelope.to_dict(), indent=2))
-        except Exception:
-            os.unlink(output_path)
-            raise
+            raise FileExistsError(
+                f"Output file already exists: {output_path}. "
+                "Remove it or specify a different path with --output."
+            )
 
         return output_path

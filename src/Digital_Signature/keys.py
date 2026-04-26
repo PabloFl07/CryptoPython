@@ -5,6 +5,7 @@ from cryptography.hazmat.primitives import serialization
 from pathlib import Path
 from getpass import getpass
 import os
+import utils
 
 
 class KeyManager:
@@ -50,18 +51,14 @@ class KeyManager:
             # os.open returns a file descriptor. Which represents the open file at OS level 
             file_descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
-                with os.fdopen(file_descriptor, "wb") as f:
-                    f.write(key)
+                with os.fdopen(file_descriptor, "wb") as file:
+                    file.write(key)
             except Exception:
                 os.close(file_descriptor)
                 os.unlink(self.path)  
                 raise
         finally:
-            if key is not None:
-                for i in range(len(key)):
-                    key[i] = 0
-            for i in range(len(password)):
-                password[i] = 0
+            utils.wipe_memory(password, key)
 
         return self.path
 
@@ -69,19 +66,17 @@ class KeyManager:
         if self.path.is_dir():
             raise ValueError("Path must be a file, not a directory")
         if not self.path.exists():
-            raise FileNotFoundError("Key File not found")
+            raise FileNotFoundError(f"Key not found at {self.path}")
         
 
         password = bytearray(getpass("Provide the password to load the private key: ").encode("utf-8"))
 
         try:
             with open(self.path, "rb") as key_file:
-                private_key = serialization.load_pem_private_key(
-                key_file.read(),
-                password=bytes(password),
-            )
-
-            return private_key
+                return serialization.load_pem_private_key(
+                    key_file.read(),
+                    password=bytes(password),
+                )
         
         except (ValueError, TypeError) as e:
             raise ValueError("Incorrect password or corrupted key file.") from e
@@ -89,8 +84,7 @@ class KeyManager:
             raise ValueError(f"Unsupported key type: {e}") from e
         
         finally:
-            for i in range(len(password)):
-                password[i] = 0
+            utils.wipe_memory(password)
 
     def get_public_key(self):
         private_key = self.load_key()
@@ -100,11 +94,10 @@ class KeyManager:
         )
         return public_key
 
-    def export_public_key(self, output_path : Path = None) -> Path:
-        public_key = self.get_public_key()
-
+    def export_public_key(self, output_path: Path = None) -> Path:
+        pub_key = self.load_key().public_key()
         out = output_path or self.path.with_suffix(".pub")
-        out.write_bytes(public_key)
-        return out    
+        out.write_text(utils.format_public_key(pub_key))
+        return out
 
 
