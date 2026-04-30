@@ -3,6 +3,7 @@ import argparse
 from keys import KeyManager
 from signer import Signer
 from pathlib import Path
+from verifier import Verifier
 class Commands:
     """
     Entry point after argument parsing. Retrieves the data and calls Run class to handle it.
@@ -48,17 +49,20 @@ class Commands:
             case "manifest":
                 if not input_path.is_dir():
                     raise ValueError(f"Manifest mode expects a directory, got: {input_path}")
-                pattern = "**/*" if args.recursive else "*"
-                files = sorted(f for f in input_path.glob(pattern) if f.is_file())
-                if not files:
-                    raise ValueError(f"No files found in: {input_path}")
-                out = signer.sign_manifest(files, output_path)
+                out = signer.sign_manifest(input_path, output_path, args.recursive)
 
         return f"[{args.mode}] Signature written to `{out}`"
 
     @staticmethod
     def auth(args):
-        raise NotImplementedError()
+        v = Verifier()
+        
+        env_path = Path(args.envelope)
+        orig_file = Path(args.file) if args.file else None
+        base_dir = Path(args.dir) if args.dir else None
+
+        result = v.verify(env_path, original_file=orig_file, base_dir=base_dir)
+        return str(result)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="File Vault")
@@ -111,10 +115,9 @@ def parse_args():
 
     # ==== verify ==== #
     p = sub.add_parser("auth", help="Verify a signature envelope")
-    p.add_argument(
-        "envelope",
-        help="Path to the .sig or .json envelope",
-    )
+    p.add_argument("envelope", help="Path to the .sig, .jsig, or manifest.json")
+    p.add_argument("--file", "-f", help="Original file (Required for detached mode)")
+    p.add_argument("--dir", "-d", help="Base directory (For manifest mode)")
 
     # Sets the target function of the command
     for cmd_name, cmd_func in [
