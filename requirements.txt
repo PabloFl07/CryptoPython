@@ -1,0 +1,4 @@
+argon2-cffi==25.1.0
+bcrypt==5.0.0
+cryptography==50.0.1
+
