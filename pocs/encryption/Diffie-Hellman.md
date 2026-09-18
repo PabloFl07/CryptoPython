@@ -25,7 +25,7 @@ $$K_A = (Y_B)^{X_A} \bmod q = (\alpha^{X_B} \bmod q)^{X_A} \bmod q = \alpha^{X_B
 
 $$K_B = (Y_A)^{X_B} \bmod q = (\alpha^{X_A} \bmod q)^{X_B} \bmod q = \alpha^{X_A X_B} \bmod q$$
 
-![](/extras/2026-09-12_19-27.png)
+![](/assets/2026-09-12_19-27.png)
 
 ### Key Mathematical Requirements
 - **Primitive Root ($\alpha$)**: The generator $\alpha$ should be a primitive root modulo $q$. This ensures that exponentiation generates all numbers in the multiplicative group $\mathbb{Z}_q^*$, maximizing the search space for an attacker trying to solve the discrete logarithm problem.
