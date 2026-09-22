@@ -1,16 +1,12 @@
-# One-Time Pads: From Perfect Secrecy to Complete Breakage
++# One-Time Pad (OTP)
 
-The One-Time Pad (OTP) was invented in 1917 by AT&T engineer Gilbert Vernam and U.S. Army Cryptanalysis Chief Joseph Mauborgne.
+The One-Time Pad (OTP) is an encryption technique that combines a plaintext message with a secret key using bitwise XOR operations. It was invented in 1917 by AT&T engineer Gilbert Vernam and U.S. Army Cryptanalysis Chief Joseph Mauborgne.
 
-Vernam initially patented an automated cipher machine using telegraph technology that combined plain text with a key using bitwise XOR operations.. Mauborgne realized that if the key were completely random, as long as the plaintext, and never reused, the cipher would be mathematically impossible to break.
+The security of the system was mathematically proven in 1949 by Claude Shannon, establishing the One-Time Pad as the only information-theoretically secure encryption method known to exist (perfect secrecy).
 
-The security of the system was later mathematically proven in 1949 by Claude Shannon, establishing the One-Time Pad as the only information-theoretically secure encryption method known to exist.
+> When properly implemented with a truly random key used only once, an OTP ciphertext provides absolute confidentiality that cannot be broken by any amount of computational power or time.
 
----
-
-## What it does
-
-The script walks through four progressive demos that together tell the complete story of OTP: how it works, why it is theoretically unbreakable, and exactly how it collapses the moment a single rule is violated. It is intended as a hands-on companion to cryptography study, not as a production tool.
+The most critical weakness of OTP is not mathematical, but practical: distributing, managing, and securely destroying keys that are as long as the messages themselves.
 
 ---
 
@@ -25,31 +21,43 @@ The script walks through four progressive demos that together tell the complete 
 | **Key reuse attack** | Encrypting two messages with the same key allows an attacker to compute `C1 ⊕ C2 = P1 ⊕ P2`, completely cancelling the key and directly exposing a relationship between both plaintexts. |
 | **Crib dragging** | A known-plaintext attack on key-reused OTP. A guessed word (crib) is slid across `P1 ⊕ P2` position by position. When aligned correctly, it cancels its own plaintext and reveals a readable fragment of the other message. |
 
----
 
-## The four demos
+## How it works
 
-### 1. OTP: Encryption & Decryption
-Basic encrypt/decrypt cycle. Shows that the same message produces different ciphertext every run (due to a fresh random key), and that decryption with a wrong key yields garbage.
+1. **Key Generation** ($K$)
 
-### 2. Perfect Secrecy
-Demonstrates why brute force is meaningless against OTP. For any ciphertext, the attacker can construct a key that maps it to *any* candidate plaintext of the same length — all results look equally valid, so there is no way to identify the real one without the key.
+A truly random key $K$ is generated with the **exact same length** as the plaintext message $m$.
 
-### 3. Key Reuse Attack
-Shows that XOR-ing two ciphertexts produced with the same key cancels it: `C1 ⊕ C2 = P1 ⊕ P2`. Contrasted against `C1 ⊕ C3` (different key), which produces meaningless output, making the vulnerability immediately visible.
+2. **Encryption** (First Pass)
 
-### 4. Crib Dragging
-Implements and runs a full crib-dragging attack. A list of suspected words is slid across `P1 ⊕ P2` byte by byte; wherever a crib aligns with its plaintext, the other message appears in clear. Demonstrates how both messages can be reconstructed without ever knowing the key.
+An XOR ($\oplus$) operation is performed between each bit of the plaintext $m$ and the key $K$:
 
+$$C = m \oplus K$$
 
-## Key takeaways
+3. **Decryption** (Reverse Pass)
 
-The OTP has three strict requirements that must all hold simultaneously:
+Because XOR is its own inverse, the receiver performs an XOR operation between the ciphertext $C$ and the same secret key $K$ to recover the original message $m$:
 
-1. **The key must be exactly as long as the plaintext.**
-2. **The key must be truly (cryptographically) random.**
-3. **The key must never be reused — for any purpose, with any message.**
+$$m = C \oplus K = (m \oplus K) \oplus K$$
+
+### Key Cryptographic Requirements
+- **Key Length ($K$)**: The key must be at least as long as the plaintext message ($\vert{}K\vert{} \ge \vert{}m\vert{}$).
+- **True Randomness**: Keys must be generated using a cryptographically secure random number generator (CSPRNG, e.g., `/dev/urandom` or `secrets`).
+- **Single-Use Guard**: A key must **never** be reused under any circumstances.
 
 Violating rule 3 does not merely weaken the cipher — it destroys it entirely. Two ciphertexts under the same key expose `P1 ⊕ P2` directly, and crib dragging can reconstruct both plaintexts without the key ever being known.
 
-This is why OTP is impractical despite being theoretically perfect: securely distributing a key as long as every message you will ever send is, in practice, harder than the original problem.
+## Why an eavesdropper can't break it
+
+An attacker intercepting the ciphertext $C$ gains zero statistical information about the original message $m$. <br>
+For any given ciphertext $C$, **every possible plaintext** of that length is equally likely, because for every candidate message $m'$, there exists a valid key $K' = C \oplus m'$ that would produce that exact ciphertext. Thus, brute-force search is mathematically useless.
+
+## ⚠️ Important security notes
+
+- **Key Reuse Catastrophe.** Reusing a key across two messages ($C_1 = m_1 \oplus K$ and $C_2 = m_2 \oplus K$) completely destroys security. An attacker can compute:
+  
+  $$C_1 \oplus C_2 = (m_1 \oplus K) \oplus (m_2 \oplus K) = m_1 \oplus m_2$$
+
+  This eliminates the key $K$ and allows the attacker to recover both plaintexts using **Crib Dragging** attacks.
+- **OTP does not provide integrity or authenticity.** An attacker can modify bits of the ciphertext $C$ in transit, causing predictable bit flips in the decrypted message without detection.
+- **Key Distribution Problem.** Securely delivering a secret key as large as the message itself is as difficult as sending the message securely in the first place.
