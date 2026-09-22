@@ -1,16 +1,11 @@
 """
 Password Hashing - POC educativo
 =================================
-Demuestra por qué el algoritmo y el salt importan,
-y cómo comparar hashes de forma segura.
-
-Secciones:
-  1. Hashing débil (MD5 / SHA-1)
-  2. Salt y rainbow tables
-  3. Hashing moderno (bcrypt / Argon2)
+Proves why the algorithm and salt matter, and how to compare hashes securely
+  1. Weak hashing algorithms (MD5 / SHA-1)
+  2. Salt and rainbow tables
+  3. Modern hashing (bcrypt / Argon2)
   4. Timing attack
-
-Dependencias: pip install bcrypt argon2-cffi
 """
 
 import hashlib
@@ -22,19 +17,35 @@ from argon2 import PasswordHasher
 import random
 import string
 
-# ====================================================================
+
+def separator(title: str = "") -> None:
+    if title:
+        print(f"\n{'─' * 60}")
+        print(f"  {title}")
+        print(f"{'─' * 60}")
+    else:
+        print(f"{'─' * 60}")
+
+    print()
+
+
+def subtitle(subtitle: str) -> None:
+    print(f"\n{subtitle}")
+    print("─" * 43)  # Adjust to the length of the subtitle
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # UNSAFE HASHING: Using general-purpose algorithms for passwords
-# ====================================================================
+# ══════════════════════════════════════════════════════════════════════════════
 #
 # These algorithms are fast, deterministic, and lack a cost factor and built-in salt.
-# That makes them unsuitable for password storing. 
+# That makes them unsuitable for password storing.
 # As they are vulnerable to brute-force attacks, rainbow tables, and GPU cracking.
 # An attacker with a mid-range GPU can brute-force the entire 8-character password space in minutes.
 
+
 def unsafe_hashing_demo():
-    print("\n" + "=" * 70)
-    print("UNSAFE HASHING DEMO: Using general-purpose algorithms for passwords")
-    print("=" * 70)
+    separator("UNSAFE HASHING: Using general-purpose algorithms for passwords")
 
     password = "password123"
 
@@ -42,7 +53,7 @@ def unsafe_hashing_demo():
         ("MD5", hashlib.md5),
         ("SHA-1", hashlib.sha1),
         ("SHA-256", hashlib.sha256),
-        ("SHA-512", hashlib.sha512)
+        ("SHA-512", hashlib.sha512),
     )
 
     for name, func in algorithms:
@@ -56,9 +67,15 @@ def unsafe_hashing_demo():
         print(f"[!] This CPU makes ~{iterations / elapsed:,.0f} hashes {name}/second")
 
     print("\nCONCLUSIONS:")
-    print("- General-purpose hashing algorithms are far too fast for passwords. Attackers can brute-force millions of guesses per second.")
-    print("- With a GPU alone, those numbers are thousands of times higher. Imagine what a dedicated brute-force hardware could do.")
-    print("- On top of that, these algorithms are deterministic. Meaning that the same password will always produce the same hash.")
+    print(
+        "- General-purpose hashing algorithms are far too fast for passwords. Attackers can brute-force millions of guesses per second."
+    )
+    print(
+        "- With a GPU alone, those numbers are thousands of times higher. Imagine what a dedicated brute-force hardware could do."
+    )
+    print(
+        "- On top of that, these algorithms are deterministic. Meaning that the same password will always produce the same hash."
+    )
 
     password = "hellohash"
 
@@ -66,26 +83,28 @@ def unsafe_hashing_demo():
     for _ in range(3):
         print(hashlib.sha256(password.encode()).hexdigest())
 
-# ============================================================
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SALT AND RAINBOW TABLES
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
 #
-# A rainbow table is a precomputed database of hash-to-password pairs. 
+# A rainbow table is a precomputed database of hash-to-password pairs.
 # If an attacker has the table and your hash, they can retrieve your password in milliseconds.
 #
-# The salt is a unique random value assigned to each user that is appended to the password before hashing. 
+# The salt is a unique random value assigned to each user that is appended to the password before hashing.
 # Even if two users use the same password, their hashes will be different, rendering any precomputed table useless.
 
+
 def salt_rainbow_demo():
-    print("\n" + "=" * 60)
-    print("SALT AND RAINBOW TABLES DEMO")
-    print("=" * 60)
+    separator("SALT AND RAINBOW TABLES DEMO")
     salt_demo()
     rainbow_table_demo()
 
+
 def random_string(length=5):
     chars = string.ascii_lowercase + string.digits
-    return ''.join(random.choices(chars, k=length))
+    return "".join(random.choices(chars, k=length))
+
 
 def salt_demo():
     password = "salty_password"
@@ -99,12 +118,52 @@ def salt_demo():
     print(f"\t2. {hashlib.sha256(salt_b + password.encode()).hexdigest()}")
     print(f"\t\t Salt:{salt_b.hex()}")
 
-def rainbow_table_demo():
-    common_passwords = ["password", "123456", "admin", "qwerty", "lethashit","monkey", "letmein", "abc123", "111111", "iloveyou","123123", "welcome", "password1", "admin123", "sunshine", "flower", "princess", "dragon", "football", "baseball", "master", "hello", "freedom", "whatever", "trustno1", "654321", "jordan23", "harley", "password123", "1234567890", "superman", "michael", "shadow", "killer", "batman", "hottie",]
-    rainbow_table = {hashlib.sha256(p.encode()).hexdigest(): p for p in common_passwords}
 
-    print(f"\nSIMPLE RAINBOW TABLE EXAMPLE (4 / {len(rainbow_table)} shown)\n"
-    "───────────────────────────────────────────")
+def rainbow_table_demo():
+    common_passwords = [
+        "password",
+        "123456",
+        "admin",
+        "qwerty",
+        "lethashit",
+        "monkey",
+        "letmein",
+        "abc123",
+        "111111",
+        "iloveyou",
+        "123123",
+        "welcome",
+        "password1",
+        "admin123",
+        "sunshine",
+        "flower",
+        "princess",
+        "dragon",
+        "football",
+        "baseball",
+        "master",
+        "hello",
+        "freedom",
+        "whatever",
+        "trustno1",
+        "654321",
+        "jordan23",
+        "harley",
+        "password123",
+        "1234567890",
+        "superman",
+        "michael",
+        "shadow",
+        "killer",
+        "batman",
+        "hottie",
+    ]
+    rainbow_table = {
+        hashlib.sha256(p.encode()).hexdigest(): p for p in common_passwords
+    }
+
+    subtitle(f"SIMPLE RAINBOW TABLE EXAMPLE (4 / {len(rainbow_table)} shown)")
+
     for hash, pwd in list(rainbow_table.items())[:4]:
         print(f"{hash} → {pwd}")
 
@@ -118,27 +177,41 @@ def rainbow_table_demo():
         found = rainbow_table[target_hash]
         elapsed = time.perf_counter() - start
         print(f"\t[+] Password found in rainbow table: '{found}'")
-        print(f"\t[+] Time to retrieve: {elapsed:.8f} seconds (Almost instantaneous for a 36 entry table. In terms of complexity, O(1) lookup time.)")
-    
-    print("\nCase 2: The target password is not in the rainbow table so we try to brute-force:")
+        print(
+            f"\t[+] Time to retrieve: {elapsed:.8f} seconds (Almost instantaneous for a 36 entry table. In terms of complexity, O(1) lookup time.)"
+        )
+
+    print(
+        "\nCase 2: The target password is not in the rainbow table so we try to brute-force:"
+    )
 
     start = time.perf_counter()
 
     for _ in range(2_000_000):
-        password = random_string(8) # Remember that we didnt even include special characters and uppercase letters. So it doesnt take as long as it could
+        password = random_string(
+            8
+        )  # Remember that we didnt even include special characters and uppercase letters. So it doesnt take as long as it could
         if hashlib.sha256(password.encode()).hexdigest() == target_hash:
             print(f"\t[+] Password found by brute-force: '{password}'")
             break
 
     elapsed = time.perf_counter() - start
-    print(f"\t[+] Time to brute-force 2 million hashes: {elapsed:.8f} seconds ( Str generation + hashing time + comparison time )")
+    print(
+        f"\t[+] Time to brute-force 2 million hashes: {elapsed:.8f} seconds ( Str generation + hashing time + comparison time )"
+    )
 
-    print("\nCase 3: The target password is salted and hashed, so we cannot use the rainbow table:")
+    print(
+        "\nCase 3: The target password is salted and hashed, so we cannot use the rainbow table:"
+    )
 
     salt = os.urandom(16)
-    salted_hash = hashlib.sha256(salt + target_password.encode()).hexdigest() # We use the same password as before, yet we cannot find it.
+    salted_hash = hashlib.sha256(
+        salt + target_password.encode()
+    ).hexdigest()  # We use the same password as before, yet we cannot find it.
 
-    print(f"\tHashed password: {salted_hash} ( We dont know if its salted or not, even then, we dont know the salt )")
+    print(
+        f"\tHashed password: {salted_hash} ( We dont know if its salted or not, even then, we dont know the salt )"
+    )
     print(f"\t\tSalt used: {salt.hex()}")
 
     if salted_hash in rainbow_table:
@@ -146,29 +219,34 @@ def rainbow_table_demo():
     else:
         print("\t[-] Password not found in rainbow table.")
 
-
     print("\nCONCLUSIONS:")
-    print("- Following the conclussions from the previous section, generating a rainbow table with general-purpose hashing algorithms is trivial.")
-    print("- Rainbow tables are effective against unsalted hashes, allowing attackers to reverse hashes to plaintext passwords in milliseconds.")
-    print("- Salting hashes renders rainbow tables useless and makes brute-force attacks significantly more difficult.")
-    print("- Even if we knew the salt, we would have to brute-force every possible password with that salt to find a match, which is computationally infeasible for strong passwords.")
+    print(
+        "- Following the conclussions from the previous section, generating a rainbow table with general-purpose hashing algorithms is trivial."
+    )
+    print(
+        "- Rainbow tables are effective against unsalted hashes, allowing attackers to reverse hashes to plaintext passwords in milliseconds."
+    )
+    print(
+        "- Salting hashes renders rainbow tables useless and makes brute-force attacks significantly more difficult."
+    )
+    print(
+        "- Even if we knew the salt, we would have to brute-force every possible password with that salt to find a match, which is computationally infeasible for strong passwords."
+    )
 
 
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
 # MODERN HASHING — bcrypt and Argon2
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
 #   - Automatic and built-in salting
 #   - Adjustable cost factor, helps them stay resistant as hardware improves
 #   - Argon2 includes additionally memory hardness.
 #
-#  The difference is insignificant for a single hash (a few milliseconds) 
+#  The difference is insignificant for a single hash (a few milliseconds)
 #  But decisive for an attacker trying billions of guesses.
 
 
 def demo_hashing_moderno():
-    print("\n" + "=" * 60)
-    print("MODERN HASHING — bcrypt and Argon2")
-    print("=" * 60)
+    separator("MODERN HASHING — bcrypt and Argon2")
 
     password = "typical_password"
 
@@ -179,7 +257,6 @@ def demo_hashing_moderno():
 
     print(f"  Hash  : {hashed_bcrypt.decode()}")
     print(f"  Time  : {elapsed_bcrypt * 1000:.1f} ms")
-
 
     print("\n2. Hashing with Argon2")
     ph = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
@@ -197,13 +274,15 @@ def demo_hashing_moderno():
     print(f"  Argon2 : {elapsed_argon2 * 1000:.1f} ms")
 
     print("\nCONCLUSIONS:")
-    print("- bcrypt and Argon2 are designed for password hashing, so they provide features that make hashes resistant to many types of attacks.")
+    print(
+        "- bcrypt and Argon2 are designed for password hashing, so they provide features that make hashes resistant to many types of attacks."
+    )
     print("- On top of that, they allow you to verify passwords easily.")
 
 
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
 # TIMING ATTACK
-# ============================================================
+# ══════════════════════════════════════════════════════════════════════════════
 #
 # A naive string comparison (== in Python) short-circuits:
 # it stops at the first differing character. This means it
@@ -224,10 +303,9 @@ def demo_hashing_moderno():
 # yourself. bcrypt.checkpw() and Argon2's ph.verify() already
 # do this internally.
 
+
 def demo_timing_attack():
-    print("\n" + "=" * 60)
-    print("TIMING ATTACK DEMO")
-    print("=" * 60)
+    separator("TIMING ATTACK DEMO")
 
     password = "time_flies"
 
@@ -240,7 +318,7 @@ def demo_timing_attack():
     # Insecure: stops at the first differing character
     start = time.perf_counter()
     for _ in range(RUNS):
-        result = (stored_hash == almost_correct)
+        result = stored_hash == almost_correct
     time_insecure = (time.perf_counter() - start) / RUNS
 
     # Secure: always compares every byte
@@ -251,15 +329,22 @@ def demo_timing_attack():
             pass
     time_secure = (time.perf_counter() - start) / RUNS
 
-    print(f"\nStored hash : {stored_hash}")
+    print(f"Stored hash : {stored_hash}")
     print(f"Almost same : {almost_correct}")
     print(f"\n  ==               : {time_insecure * 1e9:.2f} ns/op  ← variable time")
     print(f"  compare_digest() : {time_secure * 1e9:.2f} ns/op  ← constant time")
 
     print("\nCONCLUSIONS:")
-    print("- With millions of measurements the nanosecond difference becomes statistically exploitable.")
-    print("- An attacker who can measure those times precisely enough can deduce how many characters of the hash they've already guessed correctly")
-    print("- Always use hmac.compare_digest() for manual comparisons of hashes, tokens, or API keys to prevent timing attacks.")
+    print(
+        "- With millions of measurements the nanosecond difference becomes statistically exploitable."
+    )
+    print(
+        "- An attacker who can measure those times precisely enough can deduce how many characters of the hash they've already guessed correctly"
+    )
+    print(
+        "- Always use hmac.compare_digest() for manual comparisons of hashes, tokens, or API keys to prevent timing attacks."
+    )
+
 
 if __name__ == "__main__":
     unsafe_hashing_demo()
