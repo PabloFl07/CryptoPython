@@ -6,6 +6,10 @@ This type of attack allows an attacker who knows a hash value $H(m_1)$ and the l
 
 This security flaw occurs primarily when simple constructions like Hash(Secret || Message) are used for authentication instead of secure Message Authentication Codes (MACs) such as HMAC.  
 
+### Additional Content
+
+The primary way to mitigate this type of attack is to use **[HMAC](/pocs/hashing/HMAC.md)**, the standard for message authentication. Check out its own PoC
+
 ## Attack Vector  
   
 An attacker intercepts a valid data payload alongside its valid hash signature from a vulnerable Web aplication, API, protocol... that authenticate incoming HTTP parameters, cookies, or payloads by calculating Hash(SecretKey + UserData)

@@ -10,6 +10,9 @@ The cryptographic strength of the HMAC depends upon the size of the secret key t
 
 The most common attack against HMACs is brute force to uncover the secret key. HMACs are substantially less affected by collisions than their underlying hashing algorithms alone.
 
+### Additional Content
+
+HMAC is the main solution to mitigate **[Length Extension Attacks](/pocs/attacks/Length-Extension_Attacks.md)**, check out its own PoC.
 
 ## How it works
 
@@ -42,6 +45,7 @@ $$\text{HMAC}(K, m) = \text{H}\Big(\big(K' \oplus opad\big) \parallel \text{H}\b
 
 An attacker watching the transmission sees the message $M$ and the tag $\text{HMAC}(K, M)$ — but never the secret key $K$. <br>
 Without $K$, an adversary cannot compute a valid MAC for a modified message $M'$. Furthermore, because of the nested $opad$/$ipad$ structure, an attacker cannot append data to $M$ and extend the hash state, forcing them to rely on **brute-force attacks against a full 256-bit key space.**
+
 
 ## ⚠️ Important security notes
 
